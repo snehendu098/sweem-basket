@@ -86,7 +86,7 @@ func run(log *slog.Logger) error {
 		Log: log,
 		// Testnet-scaled, same reason as market-data's MIN_TVL_USD: Base Sepolia
 		// venues hold six figures at most.
-		MinVenueTVL:           config.GetEnvFloat("MIN_VENUE_TVL_USD", 50_000),
+		MinVenueTVL:           config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000),
 		DefaultChain:          config.GetEnv("DEFAULT_CHAIN", "Base"),
 		RebalanceThresholdAPY: config.GetEnvFloat("REBALANCE_THRESHOLD_APY", 0.5),
 		MaxSlippageBps:        config.GetEnvInt("MAX_SLIPPAGE_BPS", 50),

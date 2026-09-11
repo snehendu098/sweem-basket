@@ -28,9 +28,9 @@ type Moonwell struct {
 }
 
 func NewMoonwell(chain, subgraphID string) *Moonwell {
-	if subgraphID == "" {
-		subgraphID = MoonwellBaseSubgraphID
-	}
+	// Deliberately no fallback to MoonwellBaseSubgraphID: that is a Base *mainnet*
+	// deployment, and substituting it when unconfigured serves venues from the
+	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &Moonwell{Chain: chain, ID: subgraphID, MaxMarkets: 100}
 }
 

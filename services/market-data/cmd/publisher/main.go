@@ -30,7 +30,7 @@ func main() {
 		// Testnet-scaled: Base Sepolia's whole Aave+Comet universe is six figures,
 		// not eight. A mainnet-sized floor drops every venue but one, which reads
 		// as a broken router rather than as a threshold doing its job.
-		MinTVLUsd: config.GetEnvFloat("MIN_TVL_USD", 50_000),
+		MinTVLUsd: config.GetEnvFloat("MIN_TVL_USD", 5_000),
 		MaxAPY:    config.GetEnvFloat("MAX_APY", 100),
 	}
 

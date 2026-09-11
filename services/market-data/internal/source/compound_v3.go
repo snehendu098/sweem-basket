@@ -30,9 +30,9 @@ type CompoundV3 struct {
 }
 
 func NewCompoundV3(chain, subgraphID string) *CompoundV3 {
-	if subgraphID == "" {
-		subgraphID = CompoundV3BaseSubgraphID
-	}
+	// Deliberately no fallback to CompoundV3BaseSubgraphID: that is a Base *mainnet*
+	// deployment, and substituting it when unconfigured serves venues from the
+	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &CompoundV3{Chain: chain, ID: subgraphID, MaxMarkets: 50}
 }
 

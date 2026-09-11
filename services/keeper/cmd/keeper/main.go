@@ -119,7 +119,7 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 			// Base gas is ~$0.01; the same math on an expensive chain never moves.
 			Horizon: config.GetEnvDuration("BREAKEVEN_HORIZON", 30*24*time.Hour),
 		},
-		MinVenueTVL:   config.GetEnvFloat("MIN_VENUE_TVL_USD", 50_000), // testnet-scaled, see market-data MIN_TVL_USD
+		MinVenueTVL:   config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000), // testnet-scaled, see market-data MIN_TVL_USD
 		DryRun:        dryRun,
 		PendingMinAge: config.GetEnvDuration("PENDING_SWEEP_MIN_AGE", 2*time.Minute),
 		PendingGiveUp: config.GetEnvDuration("PENDING_SWEEP_GIVE_UP", 24*time.Hour),

@@ -32,9 +32,9 @@ type AaveV3 struct {
 }
 
 func NewAaveV3(chain, subgraphID string) *AaveV3 {
-	if subgraphID == "" {
-		subgraphID = AaveV3BaseSubgraphID
-	}
+	// Deliberately no fallback to AaveV3BaseSubgraphID: that is a Base *mainnet*
+	// deployment, and substituting it when unconfigured serves venues from the
+	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &AaveV3{Chain: chain, ID: subgraphID, MaxMarkets: 200}
 }
 
