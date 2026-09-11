@@ -1,0 +1,418 @@
+{
+  "markets": [
+    {
+      "id": "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
+      "name": "Moonwell USDC",
+      "isActive": true,
+      "totalDepositBalanceUSD": "8962318.6472000915874",
+      "inputToken": {
+        "id": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "16.0303876184448"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "14.5182970747872"
+        }
+      ]
+    },
+    {
+      "id": "0xf877acafa28c19b96727966690b2f44d35ad5976",
+      "name": "Moonwell cbBTC",
+      "isActive": true,
+      "totalDepositBalanceUSD": "6502658.7267081561244026",
+      "inputToken": {
+        "id": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+        "symbol": "cbBTC",
+        "decimals": 8
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "4.416401929464"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "2.85433258428"
+        }
+      ]
+    },
+    {
+      "id": "0x10ff57877b79e9bd949b3815220ec87b9fc5d2ee",
+      "name": "Moonwell LBTC",
+      "isActive": true,
+      "totalDepositBalanceUSD": "3459876.61482863045229054759106",
+      "inputToken": {
+        "id": "0xecac9c5f704e954931349da37f60e39f515c11c1",
+        "symbol": "LBTC",
+        "decimals": 8
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.0771536407824"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0008711220816"
+        }
+      ]
+    },
+    {
+      "id": "0x73902f619ceb9b31fd8efecf435cbdf89e369ba6",
+      "name": "Moonwell AERO",
+      "isActive": true,
+      "totalDepositBalanceUSD": "3427309.78120693548102744069669705",
+      "inputToken": {
+        "id": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+        "symbol": "AERO",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "6.797911323744"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "1.3059799515936"
+        }
+      ]
+    },
+    {
+      "id": "0xb4fb8fed5b3aaa8434f0b19b1b623d977e07e86d",
+      "name": "Moonwell cbXRP",
+      "isActive": true,
+      "totalDepositBalanceUSD": "2959129.8352398537146",
+      "inputToken": {
+        "id": "0xcb585250f852c6c6bf90434ab21a00f02833a4af",
+        "symbol": "cbXRP",
+        "decimals": 6
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.9999999973584"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.003823487712"
+        }
+      ]
+    },
+    {
+      "id": "0x627fe393bc6edda28e99ae648fd6ff362514304b",
+      "name": "Moonwell Wrapped Lido Staked Ether",
+      "isActive": true,
+      "totalDepositBalanceUSD": "2020968.112440238948748942327869404",
+      "inputToken": {
+        "id": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+        "symbol": "wstETH",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "4.3505086621392"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "2.637358486704"
+        }
+      ]
+    },
+    {
+      "id": "0xd64bcb70c613a6d1f4d7d57ba64bb4a0767a9682",
+      "name": "Moonwell VVV",
+      "isActive": true,
+      "totalDepositBalanceUSD": "1655501.400997117513725688174147456",
+      "inputToken": {
+        "id": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
+        "symbol": "VVV",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.0132862650192"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0000071712864"
+        }
+      ]
+    },
+    {
+      "id": "0xcb1dacd30638ae38f2b94ea64f066045b7d45f44",
+      "name": "Moonwell Rocket Ether",
+      "isActive": true,
+      "totalDepositBalanceUSD": "1505354.261445932936925475424989925",
+      "inputToken": {
+        "id": "0xb6fe221fe9eef5aba221c348ba20a1bf5e73624c",
+        "symbol": "rETH",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.1285262168256"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0000270799632"
+        }
+      ]
+    },
+    {
+      "id": "0xde8df9d942d78ede3ca06e60712582f79cfffc64",
+      "name": "Moonwell Virtual",
+      "isActive": true,
+      "totalDepositBalanceUSD": "1051050.94001750049785318684701488",
+      "inputToken": {
+        "id": "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b",
+        "symbol": "VIRTUAL",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.9999999973584"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0084393741888"
+        }
+      ]
+    },
+    {
+      "id": "0xb682c840b5f4fc58b20769e691a6fa1305a501a2",
+      "name": "Moonwell EURC",
+      "isActive": true,
+      "totalDepositBalanceUSD": "382754.761709138689",
+      "inputToken": {
+        "id": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+        "symbol": "EURC",
+        "decimals": 6
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "17.635621617648"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "16.2840380619456"
+        }
+      ]
+    },
+    {
+      "id": "0x6308204872bdb7432df97b04b42443c714904f3e",
+      "name": "Moonwell MORPHO",
+      "isActive": true,
+      "totalDepositBalanceUSD": "346315.18292550823632842570452864",
+      "inputToken": {
+        "id": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842",
+        "symbol": "MORPHO",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "22.8717519014736"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "14.7837422944944"
+        }
+      ]
+    },
+    {
+      "id": "0xdc7810b47eaab250de623f0ee07764afa5f71ed1",
+      "name": "Moonwell WELL",
+      "isActive": true,
+      "totalDepositBalanceUSD": "259643.83103797430932232210163818",
+      "inputToken": {
+        "id": "0xa88594d404727625a9437c3f886c7643872296ae",
+        "symbol": "WELL",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "3.0464251815168"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.3163877172432"
+        }
+      ]
+    },
+    {
+      "id": "0xb8051464c8c92209c92f3a4cd9c73746c4c3cfb3",
+      "name": "Moonwell weETH",
+      "isActive": true,
+      "totalDepositBalanceUSD": "159471.5937422950209066983960437483",
+      "inputToken": {
+        "id": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+        "symbol": "weETH",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.0479025406656"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0001300292352"
+        }
+      ]
+    },
+    {
+      "id": "0xfc41b49d064ac646015b459c522820db9472f4b5",
+      "name": "Moonwell wrsETH",
+      "isActive": true,
+      "totalDepositBalanceUSD": "72039.93813148404134864653435591343",
+      "inputToken": {
+        "id": "0xedfa23602d0ec14714057867a78d01e94176bea0",
+        "symbol": "wrsETH",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.0022569116832"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0000002869776"
+        }
+      ]
+    },
+    {
+      "id": "0x9a858ebff1beb0d3495bb0e2897c1528ed84a218",
+      "name": "Moonwell tBTC",
+      "isActive": true,
+      "totalDepositBalanceUSD": "36446.67023563304731734904069274",
+      "inputToken": {
+        "id": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+        "symbol": "tBTC",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.7471568470752"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0009077101488"
+        }
+      ]
+    },
+    {
+      "id": "0x73b06d8d18de422e269645eace15400de7462417",
+      "name": "Moonwell DAI",
+      "isActive": true,
+      "totalDepositBalanceUSD": "19495.65026741718033877066058715",
+      "inputToken": {
+        "id": "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+        "symbol": "DAI",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "19.9413804897792"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0"
+        }
+      ]
+    },
+    {
+      "id": "0x2f90bb22eb3979f5ffad31ea6c3f0792ca66da32",
+      "name": "Moonwell MAMO",
+      "isActive": true,
+      "totalDepositBalanceUSD": "10139.66772307530737036267352",
+      "inputToken": {
+        "id": "0x7300b37dfdfab110d83290a29dfb31b1740219fe",
+        "symbol": "MAMO",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "0.9999999973584"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.0221839172064"
+        }
+      ]
+    },
+    {
+      "id": "0xb6419c6c2e60c4025d6d06ee4f913ce89425a357",
+      "name": "Moonwell USDS",
+      "isActive": true,
+      "totalDepositBalanceUSD": "9805.43970929347499139061571059",
+      "inputToken": {
+        "id": "0x820c137fa70c8691f0e44dc420a5e53c168921dc",
+        "symbol": "USDS",
+        "decimals": 18
+      },
+      "rates": [
+        {
+          "side": "BORROWER",
+          "type": "VARIABLE",
+          "rate": "17.7442339605408"
+        },
+        {
+          "side": "LENDER",
+          "type": "VARIABLE",
+          "rate": "0.1804841136432"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "aave-v3-base-sepolia",
+  "version": "0.1.0",
+  "description": "Aave V3 reserve subgraph for Base Sepolia (chain 84532)",
+  "license": "MIT",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build --network base-sepolia",
+    "deploy": "graph deploy aave-v3-base-sepolia --network base-sepolia"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.97.1",
+    "@graphprotocol/graph-ts": "0.38.1"
+  }
+}

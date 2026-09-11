@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+client
+executor
+subgraph
+**/node_modules
+**/target
+**/.next
+*.md
+docker-compose.yml
+Dockerfile*
+*.dockerignore

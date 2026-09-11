@@ -1,0 +1,105 @@
+"""
+An Aave V3 reserve — one underlying asset in the Pool. Field names and units
+deliberately mirror aave/protocol-subgraphs so the existing market-data adapter
+(`services/market-data/internal/source/aave_v3.go`) needs no query change.
+
+Only what a yield router consumes is indexed: supply rate, supply size,
+liveness flags and an oracle price. Borrow-side accounting, users, positions,
+e-mode and rewards are out of scope.
+"""
+type Reserve @entity(immutable: false) {
+  "underlying asset address, lowercase hex"
+  id: ID!
+
+  "ERC-20 metadata of the underlying"
+  symbol: String!
+  name: String!
+  decimals: Int!
+  underlyingAsset: Bytes!
+
+  "Pool that owns the reserve, and the tokens it minted for it"
+  pool: Bytes!
+  aToken: Bytes!
+  variableDebtToken: Bytes!
+
+  """
+  currentLiquidityRate: annual simple supply rate in ray (1e27 == 100%).
+  Feed straight into RayRateToAPY() in apy.go.
+  """
+  liquidityRate: BigInt!
+  "annual simple variable borrow rate, ray"
+  variableBorrowRate: BigInt!
+  liquidityIndex: BigInt!
+  variableBorrowIndex: BigInt!
+
+  "aToken.totalSupply() — total supplied, raw underlying units (scale by `decimals`)"
+  totalLiquidity: BigInt!
+  "variableDebtToken.totalSupply() — total borrowed, raw underlying units"
+  totalCurrentVariableDebt: BigInt!
+  "totalLiquidity - totalCurrentVariableDebt, raw underlying units"
+  availableLiquidity: BigInt!
+  "totalCurrentVariableDebt / totalLiquidity, 0..1"
+  utilizationRate: BigDecimal!
+
+  "decoded from the reserve configuration bitmap (bits 56, 57, 60)"
+  isActive: Boolean!
+  isFrozen: Boolean!
+  isPaused: Boolean!
+  borrowingEnabled: Boolean!
+
+  price: PriceOracleAsset!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+
+  snapshots: [ReserveHourlySnapshot!]! @derivedFrom(field: "reserve")
+}
+
+"""
+Latest AaveOracle quote for one reserve. `priceInEth` is the historical name in
+Aave's own schema; on V3 it is the price in the oracle's base currency (USD),
+scaled by `oracle.baseCurrencyUnit`. Kept misnamed on purpose — the consumer
+already reads it under this name.
+"""
+type PriceOracleAsset @entity(immutable: false) {
+  "asset address, lowercase hex"
+  id: ID!
+  priceInEth: BigInt!
+  oracle: PriceOracle!
+  lastUpdateTimestamp: BigInt!
+}
+
+"Singleton (id `1`) describing the oracle the addresses provider currently points at."
+type PriceOracle @entity(immutable: false) {
+  id: ID!
+  proxyAddress: Bytes!
+  "1e8 on Base Sepolia — divide priceInEth by this to get USD"
+  baseCurrencyUnit: BigInt!
+  lastUpdateTimestamp: BigInt!
+}
+
+"""
+Rate and size sampled into hourly buckets, id = <reserve>-<hourIndex>. Written
+only when the reserve is touched, so `timestamp` carries the real sample time
+and a consumer computes elapsed from the samples it actually received.
+"""
+type ReserveHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  reserve: Reserve!
+  hourIndex: Int!
+  hourStartTimestamp: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+
+  liquidityRate: BigInt!
+  variableBorrowRate: BigInt!
+  liquidityIndex: BigInt!
+  totalLiquidity: BigInt!
+  totalCurrentVariableDebt: BigInt!
+  utilizationRate: BigDecimal!
+  priceInEth: BigInt!
+
+  sampleCount: Int!
+}

@@ -1,0 +1,12 @@
+{
+  "base-sepolia": {
+    "Pool": {
+      "address": "0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b",
+      "startBlock": 6719154
+    },
+    "PoolConfigurator": {
+      "address": "0x347Ae6820F48e9Dd563235742d89FAef6ffCaA72",
+      "startBlock": 6719154
+    }
+  }
+}

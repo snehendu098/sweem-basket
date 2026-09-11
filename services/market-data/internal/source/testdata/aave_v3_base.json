@@ -1,0 +1,242 @@
+{
+  "reserves": [
+    {
+      "id": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "weETH",
+      "decimals": 18,
+      "underlyingAsset": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "liquidityRate": "944669654467958837292",
+      "totalLiquidity": "15274774296308648317553",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "tBTC",
+      "decimals": 18,
+      "underlyingAsset": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+      "liquidityRate": "1625549223799421852173429",
+      "totalLiquidity": "5872302572415137999",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "7900344125822",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x2416092f143378750bb29b79ed961ab195cceea50xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "ezETH",
+      "decimals": 18,
+      "underlyingAsset": "0x2416092f143378750bb29b79ed961ab195cceea5",
+      "liquidityRate": "0",
+      "totalLiquidity": "7697077085867623816",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec220xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "cbETH",
+      "decimals": 18,
+      "underlyingAsset": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "liquidityRate": "2477356267767615507147",
+      "totalLiquidity": "45602784040630123538106",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x42000000000000000000000000000000000000060xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "WETH",
+      "decimals": 18,
+      "underlyingAsset": "0x4200000000000000000000000000000000000006",
+      "liquidityRate": "17249199903305932278982499",
+      "totalLiquidity": "81651210808332624818566",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "249825978153",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb420xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "EURC",
+      "decimals": 6,
+      "underlyingAsset": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+      "liquidityRate": "19680899449026179321731427",
+      "totalLiquidity": "6416018128458",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x63706e401c06ac8513145b7687a14804d17f814b0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "AAVE",
+      "decimals": 18,
+      "underlyingAsset": "0x63706e401c06ac8513145b7687a14804d17f814b",
+      "liquidityRate": "0",
+      "totalLiquidity": "3556599284533680485485",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "13001909000",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x660975730059246a68521a3e2fbd4740173100f50xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "syrupUSDC",
+      "decimals": 6,
+      "underlyingAsset": "0x660975730059246a68521a3e2fbd4740173100f5",
+      "liquidityRate": "0",
+      "totalLiquidity": "9133425675409",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "GHO",
+      "decimals": 18,
+      "underlyingAsset": "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee",
+      "liquidityRate": "35124162201265853417697059",
+      "totalLiquidity": "689771236061757954344709",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0x833589fcd6edb6e08f4c7c32d4f71b54bda029130xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "USDC",
+      "decimals": 6,
+      "underlyingAsset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "liquidityRate": "36352749803682859085026816",
+      "totalLiquidity": "164633554524297",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "99990000",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee4520xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "wstETH",
+      "decimals": 18,
+      "underlyingAsset": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "liquidityRate": "5575239132990022203333",
+      "totalLiquidity": "11147878987091362884647",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "0",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "cbBTC",
+      "decimals": 8,
+      "underlyingAsset": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "liquidityRate": "146676988407935392325504",
+      "totalLiquidity": "274389857286",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "6675885000000",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "USDbC",
+      "decimals": 6,
+      "underlyingAsset": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "liquidityRate": "28665627144185497106053626",
+      "totalLiquidity": "8720342096",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "100010000",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    },
+    {
+      "id": "0xecac9c5f704e954931349da37f60e39f515c11c10xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+      "symbol": "LBTC",
+      "decimals": 8,
+      "underlyingAsset": "0xecac9c5f704e954931349da37f60e39f515c11c1",
+      "liquidityRate": "0",
+      "totalLiquidity": "1967659215",
+      "isActive": true,
+      "isFrozen": false,
+      "isPaused": false,
+      "price": {
+        "priceInEth": "10849218252036",
+        "oracle": {
+          "baseCurrencyUnit": "100000000"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+"""
+A MetaMorpho vault: the ERC-4626 wrapper a depositor actually interacts with.
+Morpho publishes no APY field — yield shows up only as share price drift, so
+`sharePriceScaled` plus the hourly series is the rate signal.
+"""
+type Vault @entity(immutable: false) {
+  "vault address, lowercase hex"
+  id: ID!
+  name: String!
+  symbol: String!
+  decimals: Int!
+
+  "underlying ERC-20"
+  asset: Bytes!
+  assetSymbol: String!
+  assetDecimals: Int!
+
+  "factory that created it, and which MetaMorpho version it is (1 or 11)"
+  factory: Bytes!
+  version: Int!
+
+  "underlying units"
+  totalAssets: BigInt!
+  "share units"
+  totalSupply: BigInt!
+
+  "totalAssets / totalSupply as a decimal. Human-readable, lossy."
+  sharePrice: BigDecimal!
+  """totalAssets * 1e36 / totalSupply. Integer, scale-free ratio: feed two of
+  these straight into SharePriceGrowthToAPY(before, after, elapsed)."""
+  sharePriceScaled: BigInt!
+
+  curator: Bytes
+  owner: Bytes
+  "performance fee, WAD (1e18 == 100%)"
+  fee: BigInt
+
+  "cumulative flow, underlying units"
+  cumulativeDeposited: BigInt!
+  cumulativeWithdrawn: BigInt!
+  depositCount: BigInt!
+  withdrawCount: BigInt!
+
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+
+  snapshots: [VaultHourlySnapshot!]! @derivedFrom(field: "vault")
+  deposits: [VaultDeposit!]! @derivedFrom(field: "vault")
+  withdrawals: [VaultWithdraw!]! @derivedFrom(field: "vault")
+}
+
+"""
+Share price sampled into hourly buckets. id = <vault>-<hourIndex>, where
+hourIndex = timestamp / 3600. A bucket exists only if the vault saw at least
+one event in that hour; `timestamp` records when the sample was actually
+taken, so a consumer computes elapsed from the two samples it got rather than
+assuming the nominal spacing.
+"""
+type VaultHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  vault: Vault!
+  "unix timestamp / 3600"
+  hourIndex: Int!
+  "start of the bucket, unix seconds"
+  hourStartTimestamp: BigInt!
+  "timestamp of the last sample folded into this bucket"
+  timestamp: BigInt!
+  block: BigInt!
+
+  totalAssets: BigInt!
+  totalSupply: BigInt!
+  sharePrice: BigDecimal!
+  sharePriceScaled: BigInt!
+
+  "samples folded into this bucket"
+  sampleCount: Int!
+}
+
+type VaultDeposit @entity(immutable: true) {
+  id: ID!
+  vault: Vault!
+  sender: Bytes!
+  owner: Bytes!
+  "underlying units"
+  assets: BigInt!
+  "share units"
+  shares: BigInt!
+  block: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type VaultWithdraw @entity(immutable: true) {
+  id: ID!
+  vault: Vault!
+  sender: Bytes!
+  receiver: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  block: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}

@@ -1,0 +1,125 @@
+"""
+One Compound III (Comet) market. Comet is a single-base-asset contract, not a
+pool of reserves, so there is exactly one Market per deployed Comet and its id
+is the Comet address.
+
+Entity and field names mirror the Compound III subgraph shape the existing
+market-data adapter already queries
+(`services/market-data/internal/source/compound_v3.go`), so no query change is
+needed on the Go side.
+"""
+type Market @entity(immutable: false) {
+  "Comet proxy address, lowercase hex"
+  id: ID!
+  cometProxy: Bytes!
+  configuration: MarketConfiguration!
+  accounting: MarketAccounting!
+  creationBlockNumber: BigInt!
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+  snapshots: [MarketHourlySnapshot!]! @derivedFrom(field: "market")
+}
+
+"Static-ish market metadata. Refreshed on every touch; Comet's base asset never changes in practice."
+type MarketConfiguration @entity(immutable: false) {
+  "same id as the Market"
+  id: ID!
+  market: Market!
+  "Comet's own ERC-20 symbol, e.g. cUSDCv3"
+  symbol: String!
+  name: String!
+  baseToken: BaseToken!
+  "10^baseToken decimals"
+  baseScale: BigInt!
+  "COMP accrual speed for suppliers, scaled by trackingIndexScale"
+  baseTrackingSupplySpeed: BigInt!
+  trackingIndexScale: BigInt!
+  numAssets: Int!
+}
+
+"The base asset of a market, plus the Comet price feed used to value it."
+type BaseToken @entity(immutable: false) {
+  id: ID!
+  token: Token!
+  "Comet price feed for the base asset"
+  priceFeed: Bytes!
+  "getPrice(priceFeed), 8 decimals"
+  priceUsd: BigDecimal!
+}
+
+type Token @entity(immutable: false) {
+  "token address, lowercase hex"
+  id: ID!
+  address: Bytes!
+  symbol: String!
+  name: String!
+  decimals: Int!
+}
+
+"""
+Live market accounting. The rate fields are the reason this subgraph exists:
+Comet emits no rate event at all, so the rate has to be read from
+`getSupplyRate(getUtilization())` at every state change and stored.
+
+Comet's supply rate is a pure function of utilization, and utilization only
+moves when one of the indexed events fires — so an event-driven refresh is
+exact, not an approximation.
+"""
+type MarketAccounting @entity(immutable: false) {
+  "same id as the Market"
+  id: ID!
+  market: Market!
+
+  "totalSupply() — base asset supplied, raw units (scale by baseScale)"
+  totalBaseSupply: BigInt!
+  "totalBorrow() — base asset borrowed, raw units"
+  totalBaseBorrow: BigInt!
+  "USD, already scaled: totalBaseSupply / baseScale * baseToken.priceUsd"
+  totalBaseSupplyUsd: BigDecimal!
+  totalBaseBorrowUsd: BigDecimal!
+  "protocol reserves, raw base units (can be negative)"
+  reserves: BigInt!
+
+  "getUtilization(), 1e18-scaled"
+  utilization: BigInt!
+  "getSupplyRate(utilization) — per-SECOND growth rate scaled 1e18"
+  supplyRatePerSecond: BigInt!
+  "getBorrowRate(utilization) — per-SECOND, 1e18"
+  borrowRatePerSecond: BigInt!
+
+  """
+  supplyRatePerSecond / 1e18 * 31536000, as a plain decimal fraction
+  (0.000256 == 0.0256% APR). This is Compound's own "supply APR" convention and
+  is what APRToAPY() in apy.go expects.
+  """
+  supplyApr: BigDecimal!
+  borrowApr: BigDecimal!
+  "COMP emissions APR. Always 0 here — see README."
+  rewardSupplyApr: BigDecimal!
+  "supplyApr + rewardSupplyApr"
+  netSupplyApr: BigDecimal!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+}
+
+"Rate and size sampled into hourly buckets, id = <market>-<hourIndex>."
+type MarketHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  market: Market!
+  hourIndex: Int!
+  hourStartTimestamp: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+
+  totalBaseSupply: BigInt!
+  totalBaseBorrow: BigInt!
+  totalBaseSupplyUsd: BigDecimal!
+  utilization: BigInt!
+  supplyRatePerSecond: BigInt!
+  supplyApr: BigDecimal!
+  netSupplyApr: BigDecimal!
+  baseTokenPriceUsd: BigDecimal!
+
+  sampleCount: Int!
+}

@@ -1,0 +1,15 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# go
+/bin/
+*.test
+
+# rust
+executor/target/
+
+# node
+client/node_modules/
+client/.next/

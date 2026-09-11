@@ -1,0 +1,160 @@
+{
+  "vaults": [
+    {
+      "id": "0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
+      "name": "Steakhouse USDC",
+      "symbol": "steakUSDC",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "assetSymbol": "USDC",
+      "assetDecimals": 6,
+      "totalAssets": "24800000000000",
+      "totalSupply": "24310000000000000000000000",
+      "sharePriceScaled": "1020136354229455709157519",
+      "fee": "50000000000000000",
+      "curator": "0x255c7705e8bb334dfcae438197f7c4297988085a",
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1020136354229455709157519",
+          "totalAssets": "24800000000000"
+        },
+        {
+          "timestamp": "1704024000",
+          "sharePriceScaled": "1020068177114727854578759",
+          "totalAssets": "24610000000000"
+        },
+        {
+          "timestamp": "1703980800",
+          "sharePriceScaled": "1020000000000000000000000",
+          "totalAssets": "24400000000000"
+        }
+      ]
+    },
+    {
+      "id": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
+      "name": "Gauntlet USDC Prime",
+      "symbol": "gtUSDCp",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "assetSymbol": "USDC",
+      "assetDecimals": 6,
+      "totalAssets": "11200000000000",
+      "totalSupply": "11000000000000000000000000",
+      "sharePriceScaled": "1018181818181818181818181",
+      "fee": "0",
+      "curator": "0x1c99a1a3e1d1a2b8f9b7f0d0f5b9e4f9c1a2b3c4",
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1018181818181818181818181",
+          "totalAssets": "11200000000000"
+        }
+      ]
+    },
+    {
+      "id": "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+      "name": "Moonwell Flagship USDC",
+      "symbol": "mwUSDC",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "assetSymbol": "USDC",
+      "assetDecimals": 6,
+      "totalAssets": "8400000000000",
+      "totalSupply": "8300000000000000000000000",
+      "sharePriceScaled": "1012048192771084337349397",
+      "fee": "100000000000000000",
+      "curator": "0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1012048192771084337349397",
+          "totalAssets": "8400000000000"
+        },
+        {
+          "timestamp": "1704066000",
+          "sharePriceScaled": "1012048000000000000000000",
+          "totalAssets": "8390000000000"
+        }
+      ]
+    },
+    {
+      "id": "0xbb819d845b573b5d7c538f5b85057160cfb5f313",
+      "name": "Barbecue USDC",
+      "symbol": "bbqUSDC",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "assetSymbol": "USDC",
+      "assetDecimals": 6,
+      "totalAssets": "3100000000000",
+      "totalSupply": "3070000000000000000000000",
+      "sharePriceScaled": "1009000000000000000000000",
+      "fee": "0",
+      "curator": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1009000000000000000000000",
+          "totalAssets": "3100000000000"
+        },
+        {
+          "timestamp": "1703980800",
+          "sharePriceScaled": "1010000000000000000000000",
+          "totalAssets": "3140000000000"
+        }
+      ]
+    },
+    {
+      "id": "0x00000000000000000000000000000000000dead0",
+      "name": "Empty USDC Vault",
+      "symbol": "emptyUSDC",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "assetSymbol": "USDC",
+      "assetDecimals": 6,
+      "totalAssets": "0",
+      "totalSupply": "0",
+      "sharePriceScaled": "0",
+      "fee": "0",
+      "curator": null,
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1020136354229455709157519",
+          "totalAssets": "0"
+        },
+        {
+          "timestamp": "1703980800",
+          "sharePriceScaled": "1020000000000000000000000",
+          "totalAssets": "0"
+        }
+      ]
+    },
+    {
+      "id": "0xa0e430870c4604ccfc7b38ca7845b1ff653d0ff1",
+      "name": "Moonwell Flagship ETH",
+      "symbol": "mwETH",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "assetSymbol": "WETH",
+      "assetDecimals": 18,
+      "totalAssets": "9400000000000000000000",
+      "totalSupply": "9300000000000000000000000000000000000000",
+      "sharePriceScaled": "1010752688172043010752688",
+      "fee": "0",
+      "curator": "0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "lastUpdateTimestamp": "1704067200",
+      "snapshots": [
+        {
+          "timestamp": "1704067200",
+          "sharePriceScaled": "1010752688172043010752688",
+          "totalAssets": "9400000000000000000000"
+        },
+        {
+          "timestamp": "1703980800",
+          "sharePriceScaled": "1010600000000000000000000",
+          "totalAssets": "9380000000000000000000"
+        }
+      ]
+    }
+  ]
+}

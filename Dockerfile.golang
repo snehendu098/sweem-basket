@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# One builder for all four Go binaries. Pick which with --build-arg CMD_PATH.
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+# Module download is its own layer: editing source does not re-fetch deps.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY internal ./internal
+COPY services ./services
+
+ARG CMD_PATH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    test -n "$CMD_PATH" && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/app ./${CMD_PATH}
+
+# alpine, not distroless: compose healthchecks need busybox wget in the image.
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
+COPY --from=build /out/app /usr/local/bin/app
+USER app
+ENTRYPOINT ["/usr/local/bin/app"]

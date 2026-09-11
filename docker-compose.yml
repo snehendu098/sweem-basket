@@ -1,0 +1,195 @@
+# Whole stack. `docker compose up --build`.
+# Secrets come from the gitignored repo-root .env via env_file; nothing is baked
+# into an image. The `environment:` blocks below override only the host/port
+# values so the same .env keeps working when running services directly on the host.
+
+# Chain-specific — these change together when pointing the stack at another
+# network. Also swap executor/venues.json (its entries carry chain_id + target
+# addresses) and rebuild the executor image.
+x-chain-env: &chain-env
+  # 84532 Base Sepolia, 8453 Base mainnet. Selects the Chainlink feed
+  # table in internal/shared/prices and the keeper's ETH/USD aggregator.
+  CHAIN_ID: ${CHAIN_ID:-84532}
+  BASE_RPC_URL: ${BASE_RPC_URL:-https://sepolia.base.org}
+  CHAINS: ${CHAINS:-Base}
+  DEFAULT_CHAIN: ${DEFAULT_CHAIN:-Base}
+  MORPHO_SUBGRAPH_ID: ${MORPHO_SUBGRAPH_ID:-}
+  CHAINLINK_ETH_USD: ${CHAINLINK_ETH_USD:-}
+
+x-go-build: &go-build
+  context: .
+  dockerfile: Dockerfile.golang
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sweem
+      POSTGRES_PASSWORD: sweem
+      POSTGRES_DB: sweem
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sweem -d sweem"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: applies services/wallet/migrations/*.sql in filename order, exits 0.
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: sweem
+    volumes:
+      - ./services/wallet/migrations:/migrations:ro
+    command: >
+      sh -ec 'for f in /migrations/*.sql; do echo "applying $$f"; psql -h postgres -U sweem -d sweem -v ON_ERROR_STOP=1 -f "$$f"; done; echo "migrations complete"'
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  market-data-publisher:
+    build:
+      <<: *go-build
+      args:
+        CMD_PATH: services/market-data/cmd/publisher
+    env_file: [.env]
+    environment:
+      <<: *chain-env
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  market-data-api:
+    build:
+      <<: *go-build
+      args:
+        CMD_PATH: services/market-data/cmd/api
+    env_file: [.env]
+    environment:
+      REDIS_URL: redis://redis:6379
+      MARKET_DATA_ADDR: ":8081"
+    ports: ["8081:8081"]
+    depends_on:
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  # Fetches its Privy verification key from Privy's API at boot and refuses to
+  # start if that fails — needs outbound DNS + HTTPS. Fail-closed by design.
+  wallet:
+    build:
+      <<: *go-build
+      args:
+        CMD_PATH: services/wallet/cmd/api
+    env_file: [.env]
+    environment:
+      <<: *chain-env
+      DATABASE_URL: postgres://sweem:sweem@postgres:5432/sweem?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      MARKET_DATA_URL: http://market-data-api:8081
+      EXECUTOR_URL: http://executor:8082
+      WALLET_ADDR: ":8080"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      market-data-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  executor:
+    build:
+      context: ./executor
+    env_file: [.env]
+    environment:
+      <<: *chain-env
+      EXECUTOR_ADDR: 0.0.0.0:8082
+      # chain-specific: the allowlist baked into the image
+      VENUES_PATH: /app/venues.json
+    ports: ["8082:8082"]
+    depends_on:
+      wallet: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  # Runs live (no --dry-run). Abandons a pass if gas/ETH price is unavailable,
+  # so it needs outbound access to BASE_RPC_URL. By design.
+  keeper:
+    build:
+      <<: *go-build
+      args:
+        CMD_PATH: services/keeper/cmd/keeper
+    env_file: [.env]
+    environment:
+      <<: *chain-env
+      DATABASE_URL: postgres://sweem:sweem@postgres:5432/sweem?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      MARKET_DATA_URL: http://market-data-api:8081
+      WALLET_URL: http://wallet:8080
+      KEEPER_ADDR: ":8083"
+    ports: ["8083:8083"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      executor: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8083/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      # NEXT_PUBLIC_* are baked at build time. They resolve in the *browser*,
+      # so the URLs stay localhost, not compose hostnames.
+      args:
+        NEXT_PUBLIC_PRIVY_APP_ID: ${NEXT_PUBLIC_PRIVY_APP_ID:-}
+        NEXT_PUBLIC_PRIVY_SIGNER_ID: ${NEXT_PUBLIC_PRIVY_SIGNER_ID:-}
+        NEXT_PUBLIC_PRIVY_POLICY_ID: ${NEXT_PUBLIC_PRIVY_POLICY_ID:-}
+        NEXT_PUBLIC_WALLET_URL: ${NEXT_PUBLIC_WALLET_URL:-http://localhost:8080}
+        NEXT_PUBLIC_MARKET_DATA_URL: ${NEXT_PUBLIC_MARKET_DATA_URL:-http://localhost:8081}
+        NEXT_PUBLIC_CHAIN: ${NEXT_PUBLIC_CHAIN:-Base}
+    ports: ["3000:3000"]
+    depends_on:
+      wallet: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

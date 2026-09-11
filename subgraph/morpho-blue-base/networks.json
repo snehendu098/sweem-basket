@@ -1,0 +1,18 @@
+{
+  "base-sepolia": {
+    "MetaMorphoFactory": {
+      "address": "0xA9c3D3a366466Fa809d1Ae982Fb2c46E5fC41101",
+      "startBlock": 9315415
+    }
+  },
+  "base": {
+    "MetaMorphoFactory": {
+      "address": "0xA9c3D3a366466Fa809d1Ae982Fb2c46E5fC41101",
+      "startBlock": 13978134
+    },
+    "MetaMorphoV1_1Factory": {
+      "address": "0xFf62A7c278C62eD665133147129245053Bbf5918",
+      "startBlock": 23928808
+    }
+  }
+}
