@@ -1,4 +1,3 @@
-// Package auth verifies Privy access tokens and puts the caller on the context.
 package auth
 
 import (
@@ -17,24 +16,15 @@ import (
 
 type ctxKey struct{}
 
-// Caller is the authenticated principal behind a request.
 type Caller struct {
-	DID string // Privy user DID, e.g. "did:privy:abc123"
-	// ViaKeeper marks a request authenticated by the keeper's shared secret
-	// rather than a user's own token, so the audit trail can tell an automated
-	// move from one the user asked for.
+	DID       string
 	ViaKeeper bool
 }
 
-// KeeperAuth lets the keeper act for a user without a Privy token: the keeper
-// cannot mint one. An empty Secret disables the path entirely — it is never a
-// bypass, and the zero value is therefore safe.
 type KeeperAuth struct {
-	Secret string // KEEPER_SECRET
+	Secret string
 }
 
-// Caller authenticates a keeper request. It answers false for anything it is
-// not certain about, so the caller falls through to the normal token check.
 func (k KeeperAuth) Caller(r *http.Request) (Caller, bool) {
 	if k.Secret == "" {
 		return Caller{}, false
@@ -42,8 +32,6 @@ func (k KeeperAuth) Caller(r *http.Request) (Caller, bool) {
 	if !secretEqual(r.Header.Get("X-Keeper-Secret"), k.Secret) {
 		return Caller{}, false
 	}
-	// The keeper names the user it acts for. It is a trigger, not an
-	// authorization: the handler still checks delegation for that user.
 	did := strings.TrimSpace(r.Header.Get("X-Acting-User"))
 	if !strings.HasPrefix(did, "did:privy:") || len(did) <= len("did:privy:") {
 		return Caller{}, false
@@ -51,25 +39,16 @@ func (k KeeperAuth) Caller(r *http.Request) (Caller, bool) {
 	return Caller{DID: did, ViaKeeper: true}, true
 }
 
-// secretEqual compares in constant time without leaking the secret's length.
-// subtle.ConstantTimeCompare short-circuits to 0 on a length mismatch, which
-// makes the comparison time reveal how long the real secret is; hashing both
-// sides first makes every comparison a fixed 32 bytes.
 func secretEqual(got, want string) bool {
 	g, w := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
 }
 
-// Verifier validates Privy access tokens. Privy signs them ES256; the public
-// key (SPKI PEM) is fetched from Privy's API at startup, or supplied directly
-// via PRIVY_VERIFICATION_KEY.
 type Verifier struct {
 	key   *ecdsa.PublicKey
 	appID string
 }
 
-// NewVerifier parses an SPKI PEM verification key. appID is the Privy app ID,
-// checked as the token audience.
 func NewVerifier(pemKey, appID string) (*Verifier, error) {
 	if strings.TrimSpace(pemKey) == "" {
 		return nil, errors.New("auth: empty verification key")
@@ -84,12 +63,6 @@ func NewVerifier(pemKey, appID string) (*Verifier, error) {
 	return &Verifier{key: pub, appID: appID}, nil
 }
 
-// normalizePEM rewraps a PEM whose newlines were stripped.
-//
-// Privy's API returns the key as one unbroken line —
-// "-----BEGIN PUBLIC KEY-----MFkw…QQ==-----END PUBLIC KEY-----" — which
-// encoding/pem will not parse. A key pasted from the dashboard already has its
-// newlines, so this is a no-op for the override path.
 func normalizePEM(key string) []byte {
 	key = strings.TrimSpace(key)
 	if strings.Contains(key, "\n") {
@@ -98,7 +71,7 @@ func normalizePEM(key string) []byte {
 	const begin, end = "-----BEGIN PUBLIC KEY-----", "-----END PUBLIC KEY-----"
 	body, ok := strings.CutPrefix(key, begin)
 	if !ok {
-		return []byte(key) // not a shape we recognise; let the parser complain
+		return []byte(key)
 	}
 	body, ok = strings.CutSuffix(body, end)
 	if !ok {
@@ -113,20 +86,10 @@ func normalizePEM(key string) []byte {
 	return []byte(b.String())
 }
 
-// Doer is the HTTP client used to fetch the verification key, injected so
-// tests never reach the network.
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// FetchVerificationKey reads the app's ES256 verification key from Privy's API.
-//
-// One call at startup, cached for the process lifetime by the caller — the key
-// does not rotate mid-run, and a per-request fetch would put Privy on the
-// critical path of every authenticated call.
-//
-// Credentials go in the Basic auth header and appear in no log line or error
-// message here; callers must keep it that way.
 func FetchVerificationKey(ctx context.Context, http_ Doer, appID, appSecret string) (string, error) {
 	if strings.TrimSpace(appID) == "" || strings.TrimSpace(appSecret) == "" {
 		return "", errors.New("auth: PRIVY_APP_ID and PRIVY_APP_SECRET are required to fetch the verification key")
@@ -145,8 +108,6 @@ func FetchVerificationKey(ctx context.Context, http_ Doer, appID, appSecret stri
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		// Status only. The body can echo request details, and the credentials
-		// must never reach a log.
 		return "", fmt.Errorf("auth: fetch verification key: status %d", resp.StatusCode)
 	}
 	var out struct {
@@ -161,12 +122,10 @@ func FetchVerificationKey(ctx context.Context, http_ Doer, appID, appSecret stri
 	return out.VerificationKey, nil
 }
 
-// Verify checks signature, algorithm, issuer, audience and expiry.
 func (v *Verifier) Verify(token string) (Caller, error) {
 	claims := jwt.RegisteredClaims{}
 	_, err := jwt.ParseWithClaims(token, &claims,
 		func(t *jwt.Token) (any, error) { return v.key, nil },
-		// Pinning ES256 is what stops an alg-confusion downgrade.
 		jwt.WithValidMethods([]string{"ES256"}),
 		jwt.WithIssuer("privy.io"),
 		jwt.WithAudience(v.appID),
@@ -181,17 +140,10 @@ func (v *Verifier) Verify(token string) (Caller, error) {
 	return Caller{DID: claims.Subject}, nil
 }
 
-// Middleware rejects unauthenticated requests and stores the Caller on the
-// context. Privy tokens only.
 func (v *Verifier) Middleware(next http.Handler) http.Handler {
-	// The zero KeeperAuth has an empty secret, so the keeper path is off.
 	return v.MiddlewareAllowingKeeper(KeeperAuth{}, next)
 }
 
-// MiddlewareAllowingKeeper also accepts the keeper's shared secret. Mount it on
-// the single route the keeper is allowed to reach, never on the whole API: a
-// secret that reached /deposit would let whoever holds it move funds into
-// arbitrary venues.
 func (v *Verifier) MiddlewareAllowingKeeper(k KeeperAuth, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if caller, ok := k.Caller(r); ok {
@@ -213,7 +165,6 @@ func (v *Verifier) MiddlewareAllowingKeeper(k KeeperAuth, next http.Handler) htt
 	})
 }
 
-// FromContext returns the authenticated caller, if any.
 func FromContext(ctx context.Context) (Caller, bool) {
 	c, ok := ctx.Value(ctxKey{}).(Caller)
 	return c, ok

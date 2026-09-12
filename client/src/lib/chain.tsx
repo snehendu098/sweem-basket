@@ -20,7 +20,6 @@ import {
 
 const KEY = "sweem.chain";
 
-/** localStorage throws in private browsing and when storage is disabled. */
 function stored(): ChainId | null {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -35,7 +34,6 @@ function store(id: ChainId) {
   try {
     window.localStorage.setItem(KEY, String(id));
   } catch {
-    // Not being able to remember the choice is not worth breaking the switch.
   }
 }
 
@@ -53,15 +51,6 @@ export function useChain(): ChainCtx {
   return c;
 }
 
-/**
- * The selected network, and the bridge that lets src/lib/api.ts read it
- * without every call site passing a chain down.
- *
- * The chain itself lives in api.ts as an external store, so a switch updates
- * what the next fetch sends and re-renders every reader from the same write.
- * The server snapshot is always DEFAULT_CHAIN_ID; the remembered choice is
- * applied after hydration, so there is nothing for React to disagree about.
- */
 export function ChainProvider({ children }: { children: React.ReactNode }) {
   const chainId = useSyncExternalStore(
     subscribeChain,

@@ -1,54 +1,16 @@
 use std::{collections::HashMap, env, time::Duration};
 
-/// Chains this executor serves. Both at once: the frontend offers a network
-/// toggle, so the chain is a property of a request, never of the process.
 pub const CHAIN_IDS: [u64; 2] = [8453, 84532];
 
-/// Runtime configuration. Every field is required except `addr` — the executor
-/// signs transactions, so it refuses to start half-configured rather than
-/// failing at the first request.
-#[derive(Clone)]
 pub struct Config {
     pub addr: String,
     pub privy_app_id: String,
     pub privy_app_secret: String,
-    /// `wallet-auth:<base64 PKCS#8 P-256 key>`. Optional: wallets that are not
-    /// owned by an authorization key or key quorum do not need it, so a missing
-    /// key warns instead of refusing to start.
     pub privy_authorization_key: Option<String>,
-    /// Path to the venue allowlist. This file is the security boundary: the
-    /// executor will only ever build calldata for venues listed here.
     pub venues_path: String,
-    /// Path to the swap-path allowlist. Same boundary as `venues_path`: the
-    /// executor will only ever swap along a path listed here.
     pub swaps_path: String,
-    /// Read-only JSON-RPC node per chain, used to wait for receipts between the
-    /// calls of a sequence. Privy's wallet API only signs; it cannot read
-    /// receipts. There is deliberately no shared default across chains: polling
-    /// the wrong network for a receipt never confirms and never fails, it just
-    /// times out and reports a real transaction as pending.
     pub rpc_urls: HashMap<u64, String>,
-    /// How long to wait for a receipt before reporting the step as pending.
     pub receipt_timeout: Duration,
-}
-
-/// Hand-written so credentials never reach a log line.
-impl std::fmt::Debug for Config {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("addr", &self.addr)
-            .field("privy_app_id", &self.privy_app_id)
-            .field("privy_app_secret", &"<redacted>")
-            .field(
-                "privy_authorization_key",
-                &self.privy_authorization_key.as_ref().map(|_| "<redacted>"),
-            )
-            .field("venues_path", &self.venues_path)
-            .field("swaps_path", &self.swaps_path)
-            .field("rpc_urls", &self.rpc_urls)
-            .field("receipt_timeout", &self.receipt_timeout)
-            .finish()
-    }
 }
 
 impl Config {
@@ -75,8 +37,6 @@ impl Config {
     }
 }
 
-/// Per-chain node URL. The public endpoints rate-limit and cap eth_getLogs at
-/// 10k blocks, which is fine for receipt polling.
 fn rpc_url(chain_id: u64) -> String {
     let default = match chain_id {
         84532 => "https://sepolia.base.org",
@@ -95,7 +55,6 @@ fn require(key: &str) -> Result<String, String> {
     }
 }
 
-/// Minimal .env reader. Real environment variables always win.
 fn load_dotenv(path: &str) {
     let Ok(body) = std::fs::read_to_string(path) else {
         return;

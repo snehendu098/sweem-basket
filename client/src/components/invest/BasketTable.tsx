@@ -12,7 +12,6 @@ export function BasketTable({
 }: {
   baskets: BasketSummary[];
   apys: Map<string, number | null>;
-  /** What to say when there is nothing to show. */
   empty: React.ReactNode;
 }) {
   return (

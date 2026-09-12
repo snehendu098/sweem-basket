@@ -10,7 +10,7 @@ import {
   fmtPct,
   fmtUsd,
   isSwappable,
-  market,
+  marketAssets,
   swapPaths,
   swappableAssets,
 } from "@/lib/api";
@@ -37,19 +37,7 @@ import {
   type SettleResult,
 } from "@/lib/types";
 
-/**
- * Creating a basket and funding it are one card and one button, but two calls:
- * POST /v1/baskets then POST /v1/baskets/{id}/deposit. There is no combined
- * endpoint, so the half-done state is real and named.
- *
- * `created` outlives a failed deposit on purpose — the basket exists, and the
- * retry deposits into that id rather than creating a second empty basket.
- */
-type Phase =
-  | { kind: "idle" }
-  | { kind: "creating" }
-  | { kind: "funding" }
-  | { kind: "funded"; status: number; data: SettleResult };
+type Phase = "idle" | "creating" | "funding" | "funded";
 
 export default function Create() {
   const { ready, authenticated, wallet, me, login, createWallet, delegate, api } =
@@ -58,23 +46,15 @@ export default function Create() {
   const router = useRouter();
 
   const [name, setName] = useState("");
-  // Selection only. Basis points are a protocol unit, not something anyone
-  // creating a basket thinks in — the split is even and computed at submit.
   const [picked, setPicked] = useState<string[]>([]);
   const [amount, setAmount] = useState("1000");
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  /** Set once creation succeeds. Never cleared by a failed deposit. */
+  const [phase, setPhase] = useState<Phase>("idle");
   const [created, setCreated] = useState<Basket | null>(null);
-  /** Which of the two calls the error came from, so the card can say so. */
-  const [failedAt, setFailedAt] = useState<"create" | "fund" | null>(null);
+  const [fundFailed, setFundFailed] = useState(false);
   const { notify, detail, clear } = useSettleToast();
 
-  // The key carries the chain: switching networks is a different question,
-  // not a stale answer.
-  const assets = useAsync(`assets:${chain.label}`, () => market.assets());
+  const assets = useAsync(`assets:${chain.label}`, () => marketAssets());
   const list = assets.data?.assets ?? [];
-  // The executor's swap allowlist, the only source of truth for what a USDC
-  // deposit can be converted into. Null while loading or on failure.
   const swaps = useAsync(`swap-paths:${chain.label}`, swapPaths);
   const swappable = swaps.data
     ? swappableAssets(swaps.data, chain.chainId)
@@ -84,8 +64,6 @@ export default function Create() {
     (b) => b.symbol === QUOTE_ASSET,
   );
 
-  // Once the basket exists the backend can price the real routing, prices and
-  // all. Before that the preview is derived from the asset summary.
   const parsed = Number(amount);
   const amountValid = Number.isFinite(parsed) && parsed > 0;
   const plan = useApi<Plan>(
@@ -94,27 +72,19 @@ export default function Create() {
       : null,
   );
 
-  // Switching networks can strand an already-picked token on a chain with no
-  // route to it. Drop it here rather than shipping a basket that cannot fund.
+  const blocked = (asset: string) => !isSwappable(asset, swappable);
+  const noRoute = `no USDC swap route on ${chain.name} — this token cannot be bought with your deposit here`;
+  const many = list.length > 5;
+
   const chosen = picked.filter((a) => !blocked(a));
   const split = evenSplit(chosen);
-  // Whole percents that also sum to 100, so 3 tokens reads 34/33/33 and not
-  // three 33s. Same largest-remainder rule, different total.
   const pct = evenSplit(chosen, 100);
   const apy = split.reduce((s, w) => {
     const m = list.find((x) => x.asset === w.asset);
     return s + ((m?.best_apy ?? 0) * w.weight_bps) / TOTAL_BPS;
   }, 0);
 
-  // A token a USDC deposit cannot acquire is not offered at all — the reason
-  // lives in a tooltip, so it is answered on hover instead of discovered after
-  // a failed deposit. One predicate, so GET /swaps replaces it in one place.
-  const blocked = (asset: string) => !isSwappable(asset, swappable);
-  const noRoute = `no USDC swap route on ${chain.name} — this token cannot be bought with your deposit here`;
-  // Above a handful the chip row wraps into a wall; mainnet indexes a dozen.
-  const many = list.length > 5;
-
-  const busy = phase.kind === "creating" || phase.kind === "funding";
+  const busy = phase === "creating" || phase === "funding";
   const canSubmit = name.trim() !== "" && chosen.length > 0 && amountValid;
   const locked = created !== null;
 
@@ -135,34 +105,28 @@ export default function Create() {
 
   function reset() {
     setCreated(null);
-    setPhase({ kind: "idle" });
+    setPhase("idle");
     clear();
-    setFailedAt(null);
+    setFundFailed(false);
   }
 
-  /** POST the deposit into an existing basket. The retry path is this, alone. */
   async function fund(id: string) {
-    setPhase({ kind: "funding" });
+    setPhase("funding");
     clear();
-    setFailedAt(null);
+    setFundFailed(false);
     try {
       const res = await api<SettleResult>(`/v1/baskets/${id}/deposit`, {
         method: "POST",
         body: JSON.stringify({ amount_usd: parsed }),
       });
-      // 207 is a result, not an error: the toast warns and keeps the leg by
-      // leg breakdown one click away, and navigating away would hide which
-      // legs failed or are still pending. A clean settle moves on.
-      setPhase({ kind: "funded", status: res.status, data: res.data });
+      setPhase("funded");
       notify(res.status, res.data, { key: id, verb: "Deposited" });
       portfolio.reload();
       if (res.status !== 207) router.push(`/baskets/${id}`);
     } catch (e) {
-      // The basket still exists and is empty. Say so, and offer the retry that
-      // deposits into it instead of creating another one.
       toastError(e);
-      setFailedAt("fund");
-      setPhase({ kind: "idle" });
+      setFundFailed(true);
+      setPhase("idle");
       portfolio.reload();
     }
   }
@@ -171,17 +135,15 @@ export default function Create() {
     if (step === "connect") return login();
     if (step === "wallet") return createWallet();
     if (step === "delegate") return delegate();
-    // After a settle — including a partial one — the money has already moved.
-    // The next action is to go look at it, never to send the same amount again.
-    if (phase.kind === "funded" && created) {
+    if (phase === "funded" && created) {
       router.push(`/baskets/${created.id}`);
       return;
     }
     if (created) return fund(created.id);
 
-    setPhase({ kind: "creating" });
+    setPhase("creating");
     clear();
-    setFailedAt(null);
+    setFundFailed(false);
     let basket: Basket;
     try {
       const res = await api<Basket>("/v1/baskets", {
@@ -192,15 +154,13 @@ export default function Create() {
           chain: chain.label,
           is_public: true,
           fee_bps: 0,
-          // Real symbols, not display names: WETH stays WETH on the wire.
           weights: split,
         }),
       });
       basket = res.data;
     } catch (e) {
       toastError(e);
-      setFailedAt("create");
-      setPhase({ kind: "idle" });
+      setPhase("idle");
       return;
     }
     setCreated(basket);
@@ -302,9 +262,6 @@ export default function Create() {
                           </span>
                         </button>
                       );
-                      // The chip reads as a token; the reason lives in the
-                      // tooltip on the wrapper, which still hovers when the
-                      // control inside it is disabled.
                       return off ? (
                         <Tooltip key={a.asset} label={noRoute}>
                           {chip}
@@ -328,7 +285,6 @@ export default function Create() {
 
             {chosen.length > 0 && (
               <div className="mt-5 space-y-1.5">
-                {/* Read-only: the split is always even, so there is nothing to edit. */}
                 {pct.map((w) => (
                   <div
                     key={w.asset}
@@ -371,8 +327,6 @@ export default function Create() {
                 placeholder="0.00"
                 className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
               />
-              {/* Not a picker. You deposit dollars; the tokens above are what
-                  they are converted into. */}
               <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">
                 <TokenIcon symbol={QUOTE_ASSET} size={20} />
                 {QUOTE_ASSET}
@@ -405,7 +359,6 @@ export default function Create() {
                         {l.venue ? fmtPct(l.venue.apy) : "—"}
                       </span>
                     </div>
-                    {/* A missing price is never substituted with a number. */}
                     {l.price_usd === null && (
                       <div className="mt-1 text-xs text-warning">
                         value unknown — {l.reason || "no price feed"}
@@ -454,9 +407,9 @@ export default function Create() {
               }
               onClick={() => void submit()}
             >
-              {phase.kind === "creating"
+              {phase === "creating"
                 ? "Creating basket…"
-                : phase.kind === "funding"
+                : phase === "funding"
                   ? `Depositing ${amountValid ? fmtUsd(parsed) : ""}…`
                   : step === "connect"
                     ? "Connect"
@@ -466,7 +419,7 @@ export default function Create() {
                         ? "Enable delegation"
                         : step === "syncing" || step === "loading"
                           ? "…"
-                          : phase.kind === "funded"
+                          : phase === "funded"
                             ? "Open basket"
                             : created
                               ? `Retry deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`
@@ -475,9 +428,7 @@ export default function Create() {
           </div>
         </Panel>
 
-        {/* Created but not funded. The basket is real and empty; do not pretend
-            otherwise, and do not create a second one on retry. */}
-        {created && failedAt === "fund" && (
+        {created && fundFailed && (
           <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
             <p>
               “{created.name}” was created and is empty — the deposit did not go
@@ -495,7 +446,7 @@ export default function Create() {
         )}
 
         {detail && <SettleDetail detail={detail} onClose={clear} />}
-        {phase.kind === "funded" && created && (
+        {phase === "funded" && created && (
           <Link
             href={`/baskets/${created.id}`}
             className="inline-block text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"

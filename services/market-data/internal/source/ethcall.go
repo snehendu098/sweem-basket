@@ -13,67 +13,37 @@ import (
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
 )
 
-// Function selectors, all zero-argument or one-address, computed from the
-// canonical signatures with keccak256 and confirmed against Base by calling
-// them. Two callers share them: the venue generator, where every call is an
-// identity check, and RPCSource, where they are the live rate read.
 const (
-	SelSymbol          = "0x95d89b41" // symbol()
-	SelDecimals        = "0x313ce567" // decimals()
-	SelTotalSupply     = "0x18160ddd" // totalSupply()
-	SelAsset           = "0x38d52e0f" // asset()                ERC-4626
-	SelBaseToken       = "0xc55dae63" // baseToken()            Comet
-	SelUnderlying      = "0x6f307dc3" // underlying()           cToken
-	SelIsMToken        = "0x699cd5e2" // isMToken()             Moonwell
-	SelGetPool         = "0x026b1d5f" // getPool()              Aave addresses provider
-	SelGetReservesList = "0xd1946dbc" // getReservesList()      Aave Pool
-	SelGetReserveData  = "0x35ea6a75" // getReserveData(address) Aave Pool
-	SelGetUtilization  = "0x7eb71131" // getUtilization()       Comet
-	SelGetSupplyRate   = "0xd955759d" // getSupplyRate(uint256) Comet
-	SelDescription     = "0x7284e416" // description()          Chainlink feed
-	SelLatestRoundData = "0xfeaf968c" // latestRoundData()      Chainlink feed
-	SelGetRoundData    = "0x9a6fc8f5" // getRoundData(uint80)   Chainlink feed
-	SelGetSUSDSData    = "0x4a159379" // getSUSDSData()         Sky SSR oracle
+	SelSymbol          = "0x95d89b41"
+	SelDecimals        = "0x313ce567"
+	SelTotalSupply     = "0x18160ddd"
+	SelAsset           = "0x38d52e0f"
+	SelBaseToken       = "0xc55dae63"
+	SelUnderlying      = "0x6f307dc3"
+	SelIsMToken        = "0x699cd5e2"
+	SelGetPool         = "0x026b1d5f"
+	SelGetReservesList = "0xd1946dbc"
+	SelGetReserveData  = "0x35ea6a75"
+	SelGetUtilization  = "0x7eb71131"
+	SelGetSupplyRate   = "0xd955759d"
+	SelDescription     = "0x7284e416"
+	SelLatestRoundData = "0xfeaf968c"
+	SelGetRoundData    = "0x9a6fc8f5"
+	SelGetSUSDSData    = "0x4a159379"
 )
 
-// Caller is read-only access to one chain.
-//
-// Public Base endpoints rate-limit a burst of eth_calls, and a 429 is not
-// evidence about an address — treating it as a failed read would silently
-// shrink the venue set every time the node was busy. So transient failures are
-// retried a bounded number of times with backoff, and every answer is
-// memoised: the same getReservesList() serves every reserve of a pool.
-//
-// A Caller memoises forever, so the publisher builds a fresh one per cycle: a
-// cached rate is a wrong rate five minutes later.
 type Caller struct {
-	rpc prices.RPC
-	// Attempts bounds the retries. It is deliberately small for the publisher:
-	// retrying into a rate limit earns a ban, and a missing venue for one cycle
-	// is cheaper than a blocked node.
-	Attempts int
-	Pause    time.Duration
-	// MinInterval paces calls that actually reach the node. Public Base
-	// endpoints answer a burst of sixty eth_calls with 429s — measured, not
-	// assumed — and a venue lost to a rate limit is a venue lost for the whole
-	// cycle. Spreading the same calls over a few seconds costs nothing on a
-	// five-minute poll and is the difference between reading every reserve and
-	// reading one.
-	// MinInterval is per CALL, not per request: mainnet.base.org counts the
-	// calls inside a batch individually (measured: ~5 per second, batched or
-	// not), so a ten-call batch has to wait ten intervals.
+	rpc         prices.RPC
+	Attempts    int
+	Pause       time.Duration
 	MinInterval time.Duration
-	// MaxBatch is the node's ceiling on one batch. mainnet.base.org answers an
-	// eleven-call batch with "maximum 10 calls in 1 batch" and nothing else, so
-	// an unchunked batch is a batch that returns nothing.
-	MaxBatch int
+	MaxBatch    int
 
 	mu   sync.Mutex
 	memo map[string]memoed
 
-	// ponytail: one global gate, so calls are paced serially rather than by a
-	// real token bucket. Per-host buckets only matter once a chain has more
-	// than one node behind it.
+	// ponytail: one global gate, not a token bucket. Per-host buckets only
+	// matter once a chain has more than one node.
 	gate sync.Mutex
 	next time.Time
 }
@@ -82,7 +52,6 @@ func NewCaller(rpc prices.RPC) *Caller {
 	return &Caller{rpc: rpc, memo: map[string]memoed{}, Attempts: 6, Pause: 250 * time.Millisecond, MaxBatch: 10}
 }
 
-// pace blocks until this Caller is allowed to spend n more calls on the node.
 func (c *Caller) pace(ctx context.Context, n int) error {
 	if c.MinInterval <= 0 {
 		return nil
@@ -100,8 +69,6 @@ func (c *Caller) pace(ctx context.Context, n int) error {
 	return nil
 }
 
-// memoed is one remembered answer. Permanent failures are remembered too: a
-// reverting call reverts again, and asking twice only spends rate limit.
 type memoed struct {
 	raw string
 	err error
@@ -109,13 +76,6 @@ type memoed struct {
 
 func memoKey(to, data string) string { return strings.ToLower(to) + strings.ToLower(data) }
 
-// Prefetch answers many calls in one round trip when the transport can batch,
-// leaving the results in the memo for the ordinary Call path to pick up. It is
-// a pure optimisation: skip it and every call still works, just one POST at a
-// time — which is what earns a 429 on a public node.
-//
-// Transient per-call failures are deliberately NOT memoised, so the single-call
-// path can still retry them.
 func (c *Caller) Prefetch(ctx context.Context, calls []prices.Call) {
 	batcher, canBatch := c.rpc.(prices.Batcher)
 	if !canBatch || len(calls) == 0 {
@@ -143,8 +103,6 @@ func (c *Caller) Prefetch(ctx context.Context, calls []prices.Call) {
 	}
 }
 
-// prefetchChunk runs one batch, retrying the whole thing while the node is
-// merely busy.
 func (c *Caller) prefetchChunk(ctx context.Context, batcher prices.Batcher, chunk []prices.Call) {
 	var results []prices.Result
 	for attempt := 0; attempt < c.Attempts; attempt++ {
@@ -177,7 +135,7 @@ func (c *Caller) prefetchChunk(ctx context.Context, batcher prices.Batcher, chun
 	for i, r := range results {
 		switch {
 		case r.Err != nil && IsTransient(r.Err):
-			continue // leave it for the retrying single-call path
+			continue
 		case r.Err == nil && (r.Raw == "" || r.Raw == "0x"):
 			r.Err = fmt.Errorf("empty return from %s", chunk[i].To)
 		}
@@ -224,12 +182,6 @@ func (c *Caller) Call(ctx context.Context, to, data string) (string, error) {
 	return "", fmt.Errorf("%w (after %d attempts)", lastErr, c.Attempts)
 }
 
-// IsTransient marks the node being busy, which says nothing about the address.
-//
-// "over rate limit" is in here because mainnet.base.org returns it as a
-// per-call JSON-RPC error inside a 200 response rather than as a 429 — treating
-// that as a permanent failure is exactly how a busy node silently deletes half
-// the venue list.
 func IsTransient(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "429") || strings.Contains(s, "status 5") ||
@@ -269,7 +221,6 @@ func (c *Caller) Bool(ctx context.Context, to, sel string) (bool, error) {
 	return ok && n.Sign() > 0, nil
 }
 
-// Uint reads a single uint256 return word.
 func (c *Caller) Uint(ctx context.Context, to, sel string) (*big.Int, error) {
 	ws, err := c.Words(ctx, to, sel, 1)
 	if err != nil {
@@ -278,8 +229,6 @@ func (c *Caller) Uint(ctx context.Context, to, sel string) (*big.Int, error) {
 	return ws[0], nil
 }
 
-// Words splits a return into n 32-byte big-endian values. A struct of static
-// fields (Aave's ReserveData) is encoded as exactly that flat sequence.
 func (c *Caller) Words(ctx context.Context, to, data string, n int) ([]*big.Int, error) {
 	raw, err := c.Call(ctx, to, data)
 	if err != nil {
@@ -300,8 +249,6 @@ func (c *Caller) Words(ctx context.Context, to, data string, n int) ([]*big.Int,
 	return out, nil
 }
 
-// Text reads a solidity string return, tolerating the bytes32 form some old
-// tokens use.
 func (c *Caller) Text(ctx context.Context, to, sel string) (string, error) {
 	raw, err := c.Call(ctx, to, sel)
 	if err != nil {
@@ -311,7 +258,7 @@ func (c *Caller) Text(ctx context.Context, to, sel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(b) < 64 { // bytes32-style
+	if len(b) < 64 {
 		return strings.TrimRight(string(b), "\x00"), nil
 	}
 	off := new(big.Int).SetBytes(b[:32]).Int64()
@@ -325,7 +272,6 @@ func (c *Caller) Text(ctx context.Context, to, sel string) (string, error) {
 	return string(b[off+32 : off+32+n]), nil
 }
 
-// AddressList reads an address[] return, used for Aave's getReservesList().
 func (c *Caller) AddressList(ctx context.Context, to, sel string) ([]string, error) {
 	raw, err := c.Call(ctx, to, sel)
 	if err != nil {
@@ -347,12 +293,10 @@ func (c *Caller) AddressList(ctx context.Context, to, sel string) ([]string, err
 	return out, nil
 }
 
-// AddressArg encodes one address argument.
 func AddressArg(sel, addr string) string {
 	return sel + strings.Repeat("0", 24) + strings.ToLower(strings.TrimPrefix(addr, "0x"))
 }
 
-// UintArg encodes one uint256 argument already held as a 32-byte word.
 func UintArg(sel string, v *big.Int) string {
 	h := v.Text(16)
 	return sel + strings.Repeat("0", 64-len(h)) + h

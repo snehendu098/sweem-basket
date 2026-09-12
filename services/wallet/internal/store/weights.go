@@ -5,12 +5,8 @@ import (
 	"fmt"
 )
 
-// TotalBps is the required sum of a basket's weights.
 const TotalBps = 10000
 
-// ValidateWeights enforces the basket invariant: at least one asset, no
-// duplicates, every weight positive, and the whole thing summing to 10000 bps.
-// Kept separate from the DB because Postgres has no cross-row CHECK.
 func ValidateWeights(ws []Weight) error {
 	if len(ws) == 0 {
 		return errors.New("basket: needs at least one weight")

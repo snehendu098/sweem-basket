@@ -1,7 +1,3 @@
-// Package store is the keeper's view of the wallet service's Postgres. It is
-// read-only except for the pending-execution sweeper, which resolves rows the
-// wallet service could not: the wallet service owns this schema, so the keeper
-// touches only what nothing else will.
 package store
 
 import (
@@ -30,8 +26,6 @@ func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// Subscription is one active subscriber of one basket, already filtered down
-// to users the executor can actually act for.
 type Subscription struct {
 	UserID   string
 	PrivyDID string
@@ -39,7 +33,6 @@ type Subscription struct {
 	Chain    string
 }
 
-// Position is where one asset of one subscriber's basket currently sits.
 type Position struct {
 	Asset     string
 	VenueID   string
@@ -48,8 +41,6 @@ type Position struct {
 	EntryAPY  float64
 }
 
-// ActiveSubscriptions lists subscriptions the keeper may act on: active, with
-// delegation granted and a Privy wallet ID recorded. Anything else is inert.
 func (s *Store) ActiveSubscriptions(ctx context.Context) ([]Subscription, error) {
 	const q = `
 		SELECT s.user_id::text, u.privy_did, s.basket_id::text, b.chain
@@ -99,16 +90,11 @@ func (s *Store) Positions(ctx context.Context, userID, basketID string) ([]Posit
 	return out, rows.Err()
 }
 
-// History is the recent rebalance record for one user, the input to the
-// hysteresis and rate-limit guards.
 type History struct {
-	LastMove     map[string]time.Time // asset -> most recent successful rebalance
+	LastMove     map[string]time.Time
 	MovesLast24h int
 }
 
-// RebalanceHistory reads the executions table back far enough to answer both
-// guards in one query. Failed legs are excluded: they burned gas but moved no
-// money, so they must not lock a user out of a retry.
 func (s *Store) RebalanceHistory(ctx context.Context, userID string, since time.Time, now time.Time) (History, error) {
 	const q = `
 		SELECT asset, created_at
@@ -129,7 +115,7 @@ func (s *Store) RebalanceHistory(ctx context.Context, userID string, since time.
 		if err := rows.Scan(&asset, &at); err != nil {
 			return h, err
 		}
-		if _, seen := h.LastMove[asset]; !seen { // rows are newest-first
+		if _, seen := h.LastMove[asset]; !seen {
 			h.LastMove[asset] = at
 		}
 		if at.After(dayAgo) {
@@ -139,29 +125,19 @@ func (s *Store) RebalanceHistory(ctx context.Context, userID string, since time.
 	return h, rows.Err()
 }
 
-// --- pending execution sweep ---
-
-// PendingExecution is an execution the wallet service submitted but could not
-// resolve: the executor's receipt poll timed out, so the row sits `pending`
-// with a tx hash and no position written.
 type PendingExecution struct {
-	ID       string
-	UserID   string
-	BasketID string
-	Kind     string
-	Asset    string
-	ToVenue  string
-	// FromVenue is what a withdraw carries instead of ToVenue. The sweeper
-	// needs one of the two to know which chain to look the receipt up on.
+	ID        string
+	UserID    string
+	BasketID  string
+	Kind      string
+	Asset     string
+	ToVenue   string
 	FromVenue string
 	AmountUSD float64
 	TxHash    string
 	CreatedAt time.Time
 }
 
-// PendingExecutions lists rows worth checking a receipt for. Rows younger than
-// olderThan are skipped: a transaction submitted seconds ago has had no chance
-// to mine.
 func (s *Store) PendingExecutions(ctx context.Context, olderThan time.Time, limit int) ([]PendingExecution, error) {
 	const q = `
 		SELECT id::text, user_id::text, COALESCE(basket_id::text, ''), kind, asset,
@@ -188,9 +164,6 @@ func (s *Store) PendingExecutions(ctx context.Context, olderThan time.Time, limi
 	return out, rows.Err()
 }
 
-// ResolveExecution moves a row out of `pending`. The WHERE clause is the lock:
-// only one caller can claim a row, so two keeper instances cannot both act on
-// the same execution. Returns false when someone else got there first.
 func (s *Store) ResolveExecution(ctx context.Context, id, status string, errMsg *string) (bool, error) {
 	const q = `
 		UPDATE executions SET status = $2, error = COALESCE($3, error), updated_at = now()
@@ -202,11 +175,6 @@ func (s *Store) ResolveExecution(ctx context.Context, id, status string, errMsg 
 	return tag.RowsAffected() == 1, nil
 }
 
-// UpsertPosition writes the position the wallet service withheld while the
-// execution was pending. Keyed exactly as the wallet service keys it
-// (user_id, basket_id, asset), so running the sweeper twice cannot
-// double-count. entryAPY is optional: when the venue is not in market-data
-// right now we keep whatever APY the row already had rather than invent one.
 func (s *Store) UpsertPosition(ctx context.Context, p Position, userID, basketID, project string, entryAPY *float64) error {
 	const q = `
 		INSERT INTO positions (user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, updated_at)

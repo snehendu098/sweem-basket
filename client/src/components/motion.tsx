@@ -4,15 +4,8 @@ import { animate, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * Every animation here is gated on prefers-reduced-motion: when the user has
- * asked for less motion the components render their final state immediately,
- * they do not render a faster version of the same movement.
- */
-
 const EASE = [0.16, 1, 0.3, 1] as const;
 
-/** Fade-and-rise. */
 export function Reveal({
   children,
   delay = 0,
@@ -38,11 +31,6 @@ export function Reveal({
   );
 }
 
-/**
- * Counts a real number up on first paint. `format` owns the rendering, so a
- * value the API could not produce is never turned into a number here — pass
- * the formatted string through some other element instead.
- */
 export function CountUp({
   value,
   format,
@@ -55,7 +43,6 @@ export function CountUp({
   duration?: number;
 }) {
   const reduced = useReducedMotion();
-  // Reduced motion renders the final value with no state and no effect at all.
   if (reduced) return <span className={className}>{format(value)}</span>;
   return (
     <Counting
@@ -92,7 +79,6 @@ function Counting({
   return <span className={className}>{format(shown)}</span>;
 }
 
-/** Segmented tab control with a layout-animated indicator. Not a pill. */
 export function Segmented<T extends string>({
   value,
   onChange,
@@ -103,7 +89,6 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
   options: readonly { value: T; label: string }[];
-  /** Distinguishes indicators when two segmented controls share a page. */
   id: string;
   className?: string;
 }) {

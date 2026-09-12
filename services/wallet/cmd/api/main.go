@@ -1,5 +1,3 @@
-// Command api runs the wallet service: auth, baskets, portfolio, and the only
-// client of the executor.
 package main
 
 import (
@@ -25,10 +23,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/tokenapi"
 )
 
-// priceClients builds one Chainlink client per supported chain. Per-chain RPC
-// URLs with per-chain defaults: there is no shared BASE_RPC_URL, because one
-// node cannot answer for two networks and a price read off the wrong one is a
-// wrong number rather than a missing one.
 func priceClients() prices.Set {
 	set := prices.Set{}
 	for _, id := range chains.Supported() {
@@ -39,15 +33,13 @@ func priceClients() prices.Set {
 		set[id] = prices.New(
 			prices.NewHTTPRPC(config.GetEnv(fmt.Sprintf("BASE_RPC_URL_%d", id), def)),
 			id,
-			config.GetEnvDuration("PRICE_MAX_AGE", time.Hour), // grace atop each feed's heartbeat
+			config.GetEnvDuration("PRICE_MAX_AGE", time.Hour),
 			config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
 		)
 	}
 	return set
 }
 
-// defaultChain is the chain a basket lands on when the client does not pick
-// one. An unknown value is fatal at boot rather than a surprise at deposit.
 func defaultChain() string {
 	raw := config.GetEnv("DEFAULT_CHAIN", chains.LabelBaseMainnet)
 	label, ok := chains.Normalize(raw)
@@ -76,9 +68,6 @@ func run(log *slog.Logger) error {
 
 	appID := config.GetEnv("PRIVY_APP_ID", "")
 
-	// The verification key normally comes from Privy's API at boot, so there is
-	// one less thing to configure and it cannot go stale. PRIVY_VERIFICATION_KEY
-	// overrides the fetch for offline work and tests.
 	key := config.GetEnv("PRIVY_VERIFICATION_KEY", "")
 	if key == "" {
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -86,13 +75,11 @@ func run(log *slog.Logger) error {
 			appID, config.GetEnv("PRIVY_APP_SECRET", ""))
 		cancel()
 		if err != nil {
-			// Fail closed. A service that cannot verify tokens must not start.
 			return err
 		}
 		log.Info("fetched privy verification key")
 	}
 
-	// Fail loudly on missing auth config rather than starting an open service.
 	verifier, err := auth.NewVerifier(key, appID)
 	if err != nil {
 		return err
@@ -113,12 +100,8 @@ func run(log *slog.Logger) error {
 			config.GetEnv("TOKEN_API_URL", tokenapi.DefaultBaseURL),
 			config.GetEnv("TOKEN_API_JWT", ""),
 		),
-		// One price client per chain we serve, each bound to that chain's
-		// verified feed table. A basket's own chain selects the client.
-		Prices: priceClients(),
-		Log:    log,
-		// Testnet-scaled, same reason as market-data's MIN_TVL_USD: Base Sepolia
-		// venues hold six figures at most.
+		Prices:                priceClients(),
+		Log:                   log,
 		MinVenueTVL:           config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000),
 		DefaultChain:          defaultChain(),
 		RebalanceThresholdAPY: config.GetEnvFloat("REBALANCE_THRESHOLD_APY", 0.5),
@@ -130,7 +113,7 @@ func run(log *slog.Logger) error {
 		Handler:           httpx.CORS(config.GetEnvList("CORS_ORIGINS", []string{"http://localhost:3000"}), srv.Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      90 * time.Second, // executor calls can be slow
+		WriteTimeout:      90 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 

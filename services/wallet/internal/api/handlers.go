@@ -29,8 +29,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// --- me ---
-
 func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
 	if !ok {
@@ -39,8 +37,6 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// upsertMe binds the caller's Privy DID to their embedded wallet address.
-// The client calls this once after login, and again after granting delegation.
 func (s *Server) upsertMe(w http.ResponseWriter, r *http.Request) {
 	c, ok := auth.FromContext(r.Context())
 	if !ok {
@@ -75,19 +71,7 @@ func (s *Server) upsertMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// validPrivyWalletID returns "" when id is acceptable, or the reason it is not.
-//
-// The wallet ID and the wallet address are both strings read off the same Privy
-// object, so posting the address here typechecks, stores cleanly, and only
-// fails later as an opaque 404 from Privy — after the user has deposited and is
-// waiting on a transaction that will never exist. Catching it at the edge is
-// the difference between a 400 and a stuck deposit.
-//
-// Observed format: 24 lowercase alphanumeric characters, no prefix, e.g.
-// "dxvzlpuqjfr6iclupqssmo4a".
 func validPrivyWalletID(id string) string {
-	// Empty is legitimate: Privy leaves the server wallet ID null until the
-	// wallet is delegated, so the first POST /v1/me cannot carry one.
 	if id == "" {
 		return ""
 	}
@@ -100,7 +84,6 @@ func validPrivyWalletID(id string) string {
 		return fmt.Sprintf("privy_wallet_id must be %d lowercase alphanumeric characters, got %d",
 			privyWalletIDLen, len(id))
 	}
-	// A character-class loop beats a regexp here: clearer, and nothing to import.
 	for _, ch := range id {
 		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') {
 			return "privy_wallet_id must be 24 lowercase alphanumeric characters"
@@ -110,8 +93,6 @@ func validPrivyWalletID(id string) string {
 }
 
 const privyWalletIDLen = 24
-
-// --- baskets ---
 
 func (s *Server) createBasket(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
@@ -137,9 +118,6 @@ func (s *Server) createBasket(w http.ResponseWriter, r *http.Request) {
 	if body.Chain == "" {
 		body.Chain = s.DefaultChain
 	}
-	// Store the canonical label: venue ids, the market-data API and the
-	// executor allowlist all key on it, and "Base " or "BASE" would route
-	// nowhere at deposit time instead of failing here, in the user's face.
 	canonical, ok := chains.Normalize(body.Chain)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "unsupported chain "+body.Chain)
@@ -156,17 +134,12 @@ func (s *Server) createBasket(w http.ResponseWriter, r *http.Request) {
 		Weights:     body.Weights,
 	})
 	if err != nil {
-		// Weight-sum and duplicate-asset failures are the caller's fault.
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, b)
 }
 
-// ownerView stamps the two per-caller flags onto a basket. They are
-// independent: a creator usually subscribes to their own basket too, and a
-// basket someone made but has not joined must not read as "not joined".
-// creator_id itself stays where it is — the boolean is the whole answer.
 func ownerView(b store.Basket, userID string, subscribed bool) store.Basket {
 	b.Subscribed = subscribed
 	b.CreatedByMe = b.CreatorID == userID
@@ -192,7 +165,6 @@ func (s *Server) listBaskets(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	// One query for the whole page, not one per basket.
 	ids := make([]string, len(bs))
 	for i := range bs {
 		ids[i] = bs[i].ID
@@ -222,8 +194,6 @@ func (s *Server) getBasket(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	// The client needs to know whether to offer Join or Exit; without this it
-	// has to show both.
 	subs, err := s.Store.SubscribedTo(r.Context(), u.ID, []string{b.ID})
 	if err != nil {
 		s.Log.Warn("subscribed lookup", "err", err)
@@ -236,9 +206,6 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Exactly the preconditions deposit enforces. Subscribing without them
-	// would put the user in a state that can never execute, and they would not
-	// find out until their first deposit failed.
 	if !s.canExecute(w, u) {
 		return
 	}
@@ -262,24 +229,16 @@ func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "exited"})
 }
 
-// --- routing plan ---
-
-// PlanLeg is one asset's share of a basket and the venue it would be routed to.
 type PlanLeg struct {
-	Asset     string  `json:"asset"`
-	WeightBps int     `json:"weight_bps"`
-	AmountUSD float64 `json:"amount_usd"`
-	// PriceUSD and AmountToken are nil when the asset has no usable price feed.
-	// The leg is then unroutable rather than valued at a guess.
+	Asset       string            `json:"asset"`
+	WeightBps   int               `json:"weight_bps"`
+	AmountUSD   float64           `json:"amount_usd"`
 	PriceUSD    *float64          `json:"price_usd"`
 	AmountToken *float64          `json:"amount_token"`
 	Venue       *marketdata.Venue `json:"venue,omitempty"`
 	Reason      string            `json:"reason"`
 }
 
-// planBasket resolves a basket's weights against live venue data and returns
-// where each slice of a deposit would go. Read-only — it signs nothing. This is
-// what the client shows the user before they approve a deposit.
 func (s *Server) planBasket(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.caller(w, r); !ok {
 		return
@@ -294,10 +253,6 @@ func (s *Server) planBasket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The parse error is deliberately ignored: a missing or malformed
-	// amount_usd plans $0, which is exactly what the client asks for when it
-	// renders a basket's allocation with no amount entered yet. Do not "fix"
-	// this into a 400 — that breaks the zero-amount preview.
 	amount, _ := strconv.ParseFloat(r.URL.Query().Get("amount_usd"), 64)
 	legs, blended := s.planLegs(r, b, amount)
 
@@ -310,27 +265,17 @@ func (s *Server) planBasket(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- portfolio ---
-
-// Holding is a live position plus the drift between where it sits and where it
-// should sit. Drift is the rebalance signal.
 type Holding struct {
 	store.Position
-	CurrentAPY float64           `json:"current_apy"`
-	BestVenue  *marketdata.Venue `json:"best_venue,omitempty"`
-	DriftAPY   float64           `json:"drift_apy"`
-	// OnchainUSD is nil when the holding could not be valued from real data —
-	// never a placeholder. ValueReason then says why.
-	OnchainUSD  *float64 `json:"onchain_usd"`
-	Reconciled  bool     `json:"reconciled"`
-	ValueReason string   `json:"value_reason,omitempty"`
-	// RouteNote names a better-but-unexecutable venue when one exists.
-	RouteNote string `json:"route_note,omitempty"`
+	CurrentAPY  float64           `json:"current_apy"`
+	BestVenue   *marketdata.Venue `json:"best_venue,omitempty"`
+	DriftAPY    float64           `json:"drift_apy"`
+	OnchainUSD  *float64          `json:"onchain_usd"`
+	Reconciled  bool              `json:"reconciled"`
+	ValueReason string            `json:"value_reason,omitempty"`
+	RouteNote   string            `json:"route_note,omitempty"`
 }
 
-// driftAPY compares a position against the best venue available now.
-// Same venue: the entry rate is stale, the live rate is the truth and there is
-// nothing to move. Different venue: drift is what we would gain by moving.
 func driftAPY(p store.Position, best marketdata.Venue) (current, drift float64) {
 	if best.ID == p.VenueID {
 		return best.APY, 0
@@ -353,7 +298,6 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 	network := tokenAPINetwork(s.DefaultChain)
 	balances, onchainErr := s.TokenAPI.Balances(r.Context(), u.WalletAddress, network, 100)
 	if onchainErr != nil && !errors.Is(onchainErr, tokenapi.ErrNotConfigured) {
-		// Onchain truth is a bonus view, never a reason to fail the endpoint.
 		s.Log.Warn("token api balances", "err", onchainErr)
 	}
 
@@ -361,9 +305,6 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 	var totalUSD, weightedAPY float64
 	for _, p := range positions {
 		h := Holding{Position: p, CurrentAPY: p.EntryAPY}
-		// The best venue shown here is the best *executable* one, so the drift a
-		// user sees is drift they can actually act on. A better rate we cannot
-		// reach is named in route_note rather than hidden or promised.
 		if best, note, err := s.bestRoutable(r.Context(), p.Asset, p.Chain); err == nil {
 			h.BestVenue = &best
 			h.RouteNote = note
@@ -397,16 +338,6 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// reconcile values the wallet's onchain balance of a position's asset against
-// what our own books claim.
-//
-// Only an exact symbol match is reconciled. A position sitting in a venue is
-// usually held as a receipt token (aBasUSDC, mUSDC, …) whose redemption rate we
-// do not read onchain — guessing it is 1:1 would be inventing a number, so
-// those report unreconciled with a reason instead.
-//
-// Value comes from the asset's Chainlink feed. No feed, or a stale one, means
-// no value: nil, not a fabricated dollar.
 func (s *Server) reconcile(ctx context.Context, p store.Position, balances []tokenapi.Balance) (onchainUSD *float64, ok bool, reason string) {
 	asset := strings.ToUpper(p.Asset)
 	var tokens float64
@@ -425,13 +356,10 @@ func (s *Server) reconcile(ctx context.Context, p store.Position, balances []tok
 		return nil, false, priceReason(p.Asset, err)
 	}
 	usd := tokens * price.USD
-	tolerance := math.Max(1, p.AmountUSD*0.02) // 2% or a dollar, whichever is bigger
+	tolerance := math.Max(1, p.AmountUSD*0.02)
 	return &usd, math.Abs(usd-p.AmountUSD) <= tolerance, ""
 }
 
-// tokenAPINetwork maps our chain label onto the Token API's network name. The
-// Token API indexes Base mainnet only, so a Sepolia portfolio simply has no
-// onchain view — reported as unavailable rather than filled from mainnet.
 func tokenAPINetwork(chain string) string {
 	if id, ok := chains.ID(chain); ok && id == chains.BaseSepolia {
 		return "base-sepolia"
@@ -439,7 +367,6 @@ func tokenAPINetwork(chain string) string {
 	return "base"
 }
 
-// priceReason turns a pricing failure into something a user can act on.
 func priceReason(asset string, err error) string {
 	switch {
 	case errors.Is(err, prices.ErrNoChain):

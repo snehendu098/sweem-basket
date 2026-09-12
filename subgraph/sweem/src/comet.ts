@@ -29,15 +29,10 @@ const HOUR = 3600;
 
 export const PROTOCOL = "compound-v3";
 
-// Comet rate convention: getSupplyRate returns a PER-SECOND growth rate scaled
-// by 1e18 (the "factor scale"). Multiplying by seconds-per-year gives the
-// simple APR Compound's own UI reports. It is NOT a per-block rate.
 const FACTOR_SCALE = BigDecimal.fromString("1000000000000000000");
 const SECONDS_PER_YEAR = BigDecimal.fromString("31536000");
-// Comet price feeds are Chainlink-style, 8 decimals.
 const PRICE_SCALE = BigDecimal.fromString("100000000");
 
-/** Seeded once at the start block so the Market exists even before the first event. */
 export function handleInit(block: ethereum.Block): void {
   sync(block);
 }
@@ -58,15 +53,6 @@ export function handleWithdrawReserves(event: WithdrawReserves): void {
   sync(event.block);
 }
 
-/**
- * Read the whole market from the contract and write Market + configuration +
- * accounting + the hourly bucket + the normalized Venue. Every call is `try_`:
- * a paused Comet reverts on some getters, and that must not halt indexing.
- *
- * The Comet address comes from `dataSource.address()`, not a constant, so one
- * copy of this file serves every Comet market on every network — the block
- * handler has no event to read it from.
- */
 function sync(block: ethereum.Block): void {
   let address = dataSource.address();
   let id = address.toHexString();
@@ -90,7 +76,6 @@ function sync(block: ethereum.Block): void {
   publishVenue(comet, address, id, baseTokenId, block);
 }
 
-/** Returns the BaseToken id, or "" if the base token could not be read. */
 function syncConfiguration(
   comet: Comet,
   id: string,
@@ -216,8 +201,6 @@ function syncAccounting(
     acc.reserves = reserves.value;
   }
 
-  // Comet publishes no rate event; the rate is a pure function of utilization,
-  // so read utilization and price the curve at it.
   let utilization = comet.try_getUtilization();
   if (!utilization.reverted) {
     acc.utilization = utilization.value;
@@ -234,8 +217,6 @@ function syncAccounting(
     }
   }
 
-  // COMP emissions are not valued here — see README. rewardSupplyApr stays 0,
-  // so netSupplyApr == supplyApr and the consumer's fallback is a no-op.
   acc.netSupplyApr = acc.supplyApr.plus(acc.rewardSupplyApr);
 
   let priceUsd = BigDecimal.zero();
@@ -264,17 +245,10 @@ function syncAccounting(
   acc.save();
 }
 
-/** per-second rate scaled 1e18 -> simple annual rate as a decimal fraction. */
 function perSecondToApr(rate: BigInt): BigDecimal {
   return rate.toBigDecimal().div(FACTOR_SCALE).times(SECONDS_PER_YEAR);
 }
 
-/**
- * Comet addresses a supply position by the Comet proxy itself, so the proxy is
- * the pool key in the executor allowlist. Only the base asset earns supply
- * yield; collateral does not, which is why there is one Venue per Comet and
- * not one per collateral asset.
- */
 function publishVenue(
   comet: Comet,
   address: Address,
@@ -301,7 +275,6 @@ function publishVenue(
     }
   }
 
-  // getUtilization() is 1e18-scaled; Venue.utilization is a plain 0..1 fraction.
   let utilization = acc.utilization.toBigDecimal().div(FACTOR_SCALE);
 
   let paused = comet.try_isSupplyPaused();

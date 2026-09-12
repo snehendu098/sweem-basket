@@ -15,34 +15,14 @@ import { CircleDashed, Wallet } from "lucide-react";
 import { displayAsset, displayProject, fmtPct, fmtUsd } from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
 
-/**
- * One row of the diagram: a slice of the basket, the asset it is held as, and
- * the venue it sits in. `venue` null means the money has nowhere to go — the
- * asset node is drawn with no venue edge and `reason` explains it.
- */
 export type FlowLeg = {
   asset: string;
-  /** Null is "we could not value this", never zero. */
   amountUsd: number | null;
   venue: { project: string; apy: number } | null;
-  /** venue_id === IDLE_VENUE_ID: safe, but unplaced and earning nothing. */
   idle: boolean;
   reason?: string;
 };
 
-/**
- * Protocol marks, bundled like the token marks and for the same reason: a
- * hotlinked CDN <img> is a network request that fails into a broken image.
- * Keyed by the venue's own `project` slug, so nothing is guessed from a name.
- *
- *   aave-v3      trustwallet/assets ethereum 0x7Fc6…DDaE9 (AAVE) logo.png
- *   compound-v3  trustwallet/assets ethereum 0xc00e…26888 (COMP) logo.png
- *   moonwell     trustwallet/assets base     0xA885…296AE (WELL) logo.png
- *   morpho-blue  cdn.morpho.org/assets/logos/morpho.svg
- *
- * Anything unmapped renders as its label alone. A missing mark is honest; the
- * wrong protocol's mark is not.
- */
 const PROTOCOL_MARK: Record<string, string> = {
   "aave-v3": "aave-v3.png",
   "compound-v3": "compound-v3.png",
@@ -53,29 +33,21 @@ const PROTOCOL_MARK: Record<string, string> = {
 type CardData = {
   [k: string]: unknown;
   title: string;
-  /** The figure this node is about: the slice's value, or the venue's rate. */
   value?: string;
-  /** Said instead of a value, when there is no value to say. */
   note?: string;
-  /** Token mark, by API symbol. */
   symbol?: string;
-  /** Protocol mark, by venue `project` slug. */
   project?: string;
-  /** The money's origin: the user's own wallet. */
   wallet?: boolean;
   tone?: "idle" | "muted";
   valueTone?: "positive";
-  /** Suppresses the handle on the side nothing connects to. */
   ends?: "left" | "right";
 };
 
 type CardNode = Node<CardData, "card">;
 
-/** One surface for every box on the diagram. States tint it; none replace it. */
 const BASE = "flex h-full items-center gap-2.5 rounded-xl border px-3 py-2.5";
 
 const TONE: Record<string, string> = {
-  // Deliberate, not an alarm: a warning-tinted card, not a filled banner.
   idle: "border-warning/30 bg-card text-warning",
   muted: "border-dashed border-border bg-card text-muted-foreground",
 };
@@ -93,8 +65,6 @@ function Mark({ data }: { data: CardData }) {
   const file = data.project ? PROTOCOL_MARK[data.project] : undefined;
   if (!file) return null;
   return (
-    // Plain <img>: fixed-size marks already at their final dimensions, so the
-    // optimizer has nothing to do.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={`/protocols/${file}`}
@@ -141,28 +111,14 @@ function Card({ data }: NodeProps<CardNode>) {
 
 const nodeTypes = { card: Card };
 
-// Every card is the same fixed height, whether it carries one line or two.
-// React Flow puts a handle at the vertical centre of the node box, so equal
-// heights are what makes a same-row connection come out horizontal — a taller
-// asset card next to a shorter wallet card is what made the first edge bow.
-// Widths are measured for the longest label each column can hold
-// ("Compound v3", "value unknown").
+// Uniform height: unequal heights bow same-row edges.
 const ROW = 88;
 const HEIGHT = 64;
 const WIDTH = { basket: 150, asset: 160, venue: 180 };
 const COL = { basket: 0, asset: 200, venue: 410 };
 
-/** Straight, because these are connectors: a curve implies a path that bends. */
 const defaultEdgeOptions = { type: "straight" } as const;
 
-/**
- * Where the money is and how it was divided. A diagram, not a canvas: every
- * interaction is off, the layout is computed, and there is no minimap.
- *
- * Every figure sits inside the node it describes. Edges are bare connectors:
- * a label on the line crowds the line, and a value belongs to the thing it is
- * the value of.
- */
 export function BasketFlow({
   legs,
   emptyLabel,
@@ -180,8 +136,6 @@ export function BasketFlow({
       id: "basket",
       type: "card",
       position: { x: COL.basket, y: mid },
-      // A wallet, not a basket monogram: the money never leaves the user's own
-      // wallet, which is the whole point of the architecture.
       data: { title: "Your wallet", wallet: true, ends: "left" },
       style: { width: WIDTH.basket, height: HEIGHT },
       draggable: false,
@@ -196,7 +150,6 @@ export function BasketFlow({
         position: { x: COL.asset, y },
         data: {
           title: displayAsset(l.asset),
-          // A missing value is stated, not replaced with a number.
           ...(l.amountUsd === null
             ? { note: "value unknown" }
             : { value: fmtUsd(l.amountUsd) }),
@@ -227,8 +180,6 @@ export function BasketFlow({
       }
 
       if (!l.venue) {
-        // No venue edge at all: there is nowhere for this slice to go, and a
-        // dangling arrow would imply there is.
         nodes.push({
           id: `none:${l.asset}`,
           type: "card",
@@ -250,7 +201,6 @@ export function BasketFlow({
         id: venue,
         type: "card",
         position: { x: COL.venue, y },
-        // The protocol's own name, never the internal venue id.
         data: {
           title: displayProject(l.venue.project),
           value: fmtPct(l.venue.apy),
@@ -276,8 +226,6 @@ export function BasketFlow({
   }
 
   return (
-    // pb-3 is the panel's bottom breathing room; border-box means it comes out
-    // of the height, so the height allows for it.
     <div
       className="pb-3"
       style={{ height: Math.max(200, legs.length * ROW + 76) }}

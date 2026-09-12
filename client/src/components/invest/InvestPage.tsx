@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { blendApy, market, publicBaskets, sameChain } from "@/lib/api";
+import { blendApy, marketAssets, publicBaskets, sameChain } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
 import { ErrorBox, Spinner } from "@/components/ui";
@@ -20,19 +20,14 @@ export function InvestPage() {
   const [asset, setAsset] = useState(ALL_ASSETS);
   const [search, setSearch] = useState("");
 
-  // Browsing needs no session. Once there is one we switch to the authed list,
-  // which is the only one carrying `subscribed`.
   const anon = useAsync<BasketSummary[]>(`public-baskets:${authenticated}`, () =>
     authenticated ? Promise.resolve([]) : publicBaskets(),
   );
   const authed = useApi<Basket[] | null>(
     authenticated ? "/v1/baskets?scope=public" : null,
   );
-  const summaries = useAsync(`assets:${chain.label}`, () => market.assets());
+  const summaries = useAsync(`assets:${chain.label}`, () => marketAssets());
 
-  // Both networks come back in one list, so the selected chain is what picks
-  // the rows apart. `chain.label` is in the deps because switching networks has
-  // to re-run this, not just re-render around it.
   const baskets: BasketSummary[] = useMemo(
     () =>
       (authenticated ? (authed.data ?? []) : (anon.data ?? [])).filter((b) =>
@@ -43,11 +38,8 @@ export function InvestPage() {
   const loading = authenticated ? authed.loading : anon.loading;
   const error = authenticated ? authed.error : anon.error;
 
-  const assetRows = useMemo(
-    () => summaries.data?.assets ?? [],
-    [summaries.data],
-  );
-  // One /assets call covers every basket: no /plan request per card.
+  // Memoised for identity, not for cost: `apys` depends on it.
+  const assetRows = useMemo(() => summaries.data?.assets ?? [], [summaries.data]);
   const apys = useMemo(
     () => new Map(baskets.map((b) => [b.id, blendApy(b.weights, assetRows)])),
     [baskets, assetRows],
@@ -72,7 +64,6 @@ export function InvestPage() {
     });
   }, [baskets, asset, search]);
 
-  // Featured is the highest APY first; baskets with no computable APY sink.
   const featured = useMemo(
     () =>
       [...filtered]
@@ -113,8 +104,6 @@ export function InvestPage() {
         apys={apys}
         empty={
           baskets.length === 0 ? (
-            // Not an empty table: an empty table on the wrong network looks
-            // broken, and the answer is either to switch or to make one.
             <>
               No baskets on {chain.name} yet.{" "}
               <Link href="/" className="text-foreground underline underline-offset-4">

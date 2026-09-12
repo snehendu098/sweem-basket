@@ -1,7 +1,3 @@
-// Package executor is the client for the Rust executor service.
-//
-// The executor is the only component that signs and submits transactions.
-// It accepts requests from this service only — nothing else may call it.
 package executor
 
 import (
@@ -15,49 +11,35 @@ import (
 	"time"
 )
 
-// RouteRequest asks the executor to move a user's funds into or between venues.
-// The executor signs via the user's Privy delegated action; funds never leave
-// the user's own embedded wallet.
 type RouteRequest struct {
-	ExecutionID   string `json:"execution_id"` // our idempotency key
-	UserWallet    string `json:"user_wallet"`
-	PrivyDID      string `json:"privy_did"`
-	PrivyWalletID string `json:"privy_wallet_id"`
-	Chain         string `json:"chain"`
-	// ChainID is what the executor enforces against: every venue named here
-	// must live on this chain. The label above is for humans and logs.
+	ExecutionID   string  `json:"execution_id"`
+	UserWallet    string  `json:"user_wallet"`
+	PrivyDID      string  `json:"privy_did"`
+	PrivyWalletID string  `json:"privy_wallet_id"`
+	Chain         string  `json:"chain"`
 	ChainID       int     `json:"chain_id"`
 	Asset         string  `json:"asset"`
 	AmountUSD     float64 `json:"amount_usd"`
-	Action        string  `json:"action"` // deposit | withdraw | rebalance
+	Action        string  `json:"action"`
 	FromVenueID   string  `json:"from_venue_id,omitempty"`
 	ToVenueID     string  `json:"to_venue_id,omitempty"`
 	MaxSlippageBp int     `json:"max_slippage_bps"`
 }
 
-// Step is one transaction in a multi-call sequence. Omitted entirely when the
-// request was rejected before anything was submitted, so a nil Steps is normal.
 type Step struct {
 	Step    int    `json:"step"`
 	TxHash  string `json:"tx_hash"`
-	Outcome string `json:"outcome"` // confirmed | reverted | pending | submitted | failed
+	Outcome string `json:"outcome"`
 }
 
 type RouteResponse struct {
 	ExecutionID string `json:"execution_id"`
 	TxHash      string `json:"tx_hash"`
-	// Status is submitted | confirmed | failed | pending.
-	//
-	// pending means the receipt poll timed out, NOT that the transaction
-	// failed: it is probably still in the mempool. Treating it as failed would
-	// invite a second submission of money that already moved.
-	Status string `json:"status"`
-	Steps  []Step `json:"steps,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Status      string `json:"status"`
+	Steps       []Step `json:"steps,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
-// SwapPath is one entry of the executor's swap allowlist: a pair it will
-// route, and nothing about how. Hops is informational.
 type SwapPath struct {
 	ChainID int    `json:"chain_id"`
 	From    string `json:"from"`
@@ -65,7 +47,6 @@ type SwapPath struct {
 	Hops    int    `json:"hops"`
 }
 
-// AllowedVenue is one entry of the executor's allowlist.
 type AllowedVenue struct {
 	ID      string `json:"id"`
 	Kind    string `json:"kind"`
@@ -77,10 +58,6 @@ type Client struct {
 	base string
 	http *http.Client
 
-	// The allowlist only changes when the executor restarts, so it is cached.
-	// It is never defaulted to "everything is allowed": a failed fetch is an
-	// error the caller must surface, because routing without it would propose
-	// venues the executor will refuse.
 	mu       sync.Mutex
 	allow    map[string]AllowedVenue
 	allowAt  time.Time
@@ -90,7 +67,6 @@ type Client struct {
 }
 
 func New(baseURL string) *Client {
-	// Signing plus submission is slower than a normal API call; give it room.
 	return &Client{
 		base:     baseURL,
 		http:     &http.Client{Timeout: 60 * time.Second},
@@ -98,10 +74,6 @@ func New(baseURL string) *Client {
 	}
 }
 
-// Allowlist returns the venues the executor will actually transact with, keyed
-// by venue id. This is the source of truth for what is routable: market-data
-// indexes every venue it can see, including protocols the executor cannot
-// encode calldata for.
 func (c *Client) Allowlist(ctx context.Context) (map[string]AllowedVenue, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -116,9 +88,7 @@ func (c *Client) Allowlist(ctx context.Context) (map[string]AllowedVenue, error)
 		return nil, err
 	}
 	if len(body.Venues) == 0 {
-		// An empty allowlist would silently make every basket unroutable. The
-		// executor refuses to start in that state, so seeing it here means we
-		// are talking to something unexpected.
+		// Fail closed: an empty allowlist must not be read as "allow anything".
 		return nil, errors.New("executor: allowlist is empty")
 	}
 	out := make(map[string]AllowedVenue, len(body.Venues))
@@ -129,10 +99,6 @@ func (c *Client) Allowlist(ctx context.Context) (map[string]AllowedVenue, error)
 	return out, nil
 }
 
-// SwapPaths returns the pairs the executor will swap. Same contract as
-// Allowlist: cached for the same TTL, and a failed fetch is an error rather
-// than "assume anything is swappable" — a leg routed without a path exists
-// only to fail at submission, after the user has committed.
 func (c *Client) SwapPaths(ctx context.Context) ([]SwapPath, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -146,17 +112,13 @@ func (c *Client) SwapPaths(ctx context.Context) ([]SwapPath, error) {
 		return nil, err
 	}
 	if len(body.Paths) == 0 {
-		// The executor refuses to start with an empty swaps.json, so this means
-		// we are talking to something unexpected — not that nothing is routable.
 		return nil, errors.New("executor: swap allowlist is empty")
 	}
 	c.swaps, c.swapsAt = body.Paths, time.Now()
 	return c.swaps, nil
 }
 
-// HasSwapPath reports whether the executor will route from -> to on a chain.
-// ponytail: linear scan; the allowlist is a handful of pairs, index it if it
-// ever grows past a screenful.
+// ponytail: linear scan; index it if the allowlist grows past a screenful.
 func HasSwapPath(paths []SwapPath, chainID int, from, to string) bool {
 	for _, p := range paths {
 		if p.ChainID == chainID && p.From == from && p.To == to {
@@ -166,8 +128,6 @@ func HasSwapPath(paths []SwapPath, chainID int, from, to string) bool {
 	return false
 }
 
-// getJSON fetches and decodes one read-only executor endpoint. label names the
-// call in errors, which is all that differed between the two callers.
 func (c *Client) getJSON(ctx context.Context, path, label string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {

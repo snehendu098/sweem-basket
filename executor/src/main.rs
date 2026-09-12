@@ -1,10 +1,3 @@
-//! Executor: the only component that signs and submits transactions.
-//!
-//! It accepts requests from the wallet service alone. Funds never enter a wallet
-//! this service controls — every transaction is sent from the user's own Privy
-//! embedded wallet via a delegated action, bounded by two independent limits:
-//! Privy's policy engine, and the local venue allowlist in `venues.json`.
-
 mod auth;
 mod config;
 mod privy;
@@ -27,12 +20,7 @@ use crate::{
 pub struct AppState {
     pub privy: Arc<Privy>,
     pub venues: Arc<Registry>,
-    /// Allowlisted Uniswap v3 paths. A deposit into a non-USD asset buys it
-    /// here first; a path absent from this list is refused like an unknown venue.
     pub swaps: Arc<SwapRegistry>,
-    /// Read-only node per chain, used to confirm each call before the next is
-    /// submitted. Keyed by chain id so a mainnet route is never confirmed
-    /// against a testnet node.
     pub rpc: HashMap<u64, Arc<Rpc>>,
     pub receipt_timeout: Duration,
 }
@@ -60,8 +48,6 @@ async fn run() -> Result<(), String> {
     info!(count = swaps.len(), path = %cfg.swaps_path, "swap allowlist loaded");
     info!(rpc = ?cfg.rpc_urls, receipt_timeout = ?cfg.receipt_timeout, "receipt polling configured");
 
-    // A malformed key is a misconfiguration, so fail fast; an absent one is
-    // legitimate for wallets with no authorization-key owner.
     let authorizer = match cfg.privy_authorization_key.as_deref() {
         Some(key) => Some(Authorizer::new(key).map_err(|e| format!("PRIVY_AUTHORIZATION_PRIVATE_KEY: {e}"))?),
         None => {
@@ -124,9 +110,6 @@ async fn health(
     }))
 }
 
-/// The allowlist, read-only. The wallet service filters its routing against
-/// this so it never proposes a venue that would be refused at submission time.
-/// Optional `?chain_id=` narrows it to one chain.
 async fn list_venues(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Query(q): axum::extract::Query<VenueQuery>,
@@ -140,10 +123,6 @@ async fn list_venues(
     Json(json!({ "count": venues.len(), "venues": venues }))
 }
 
-/// The swap allowlist, read-only, for the same reason `/venues` is: a caller
-/// that cannot see which pairs are routable will propose legs this executor
-/// refuses at submission time — after the user has committed. Construction
-/// details (routers, quoters, hop tokens, fee tiers) stay private.
 async fn list_swaps(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Query(q): axum::extract::Query<VenueQuery>,

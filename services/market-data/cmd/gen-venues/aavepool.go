@@ -15,12 +15,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/source"
 )
 
-// Our Base Sepolia Aave subgraph keys a reserve by the underlying alone, so the
-// Pool address cannot be recovered from the id the way the upstream schema's
-// `underlying + provider` id allows. It carries the Pool as a field instead;
-// this reads it once per chain. Whatever comes back is still proved on chain by
-// getReservesList() before anything is emitted — the index names a candidate,
-// the chain confirms it.
 var aavePools struct {
 	sync.Mutex
 	byChain map[int]map[string]string

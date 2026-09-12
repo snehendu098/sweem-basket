@@ -9,12 +9,6 @@ import {
 } from "lucide-react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
-/**
- * One theme, so no next-themes: the app is dark everywhere and the toast reads
- * from the same tokens as every other surface. Only the icon carries the tone
- * — a fully tinted toast next to the lime primary is noise, and a warning must
- * not look like an error.
- */
 const Toaster = (props: ToasterProps) => (
   <Sonner
     theme="dark"

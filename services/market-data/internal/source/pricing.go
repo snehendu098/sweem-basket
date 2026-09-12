@@ -9,33 +9,24 @@ import (
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
 )
 
-// PriceFeed is the USD price source every adapter shares — in production the
-// Chainlink client in internal/shared/prices, in tests a stub. Nothing here
-// falls back to a peg: an asset we cannot price is an asset we do not route.
 type PriceFeed interface {
 	USD(ctx context.Context, symbol string) (prices.Price, error)
 }
 
-// Pricer is the one USD conversion path for all adapters, scoped to a single
-// fetch. It carries the fetch context so Map stays a pure schema mapper with no
-// transport arguments, and records every asset it could not price so
-// GET /sources can show which assets are missing feeds instead of them just
-// vanishing from the venue list.
 type Pricer struct {
 	ctx  context.Context
 	feed PriceFeed
 
 	mu     sync.Mutex
-	missed map[string]string // asset -> reason
+	missed map[string]string
 }
 
 func NewPricer(ctx context.Context, feed PriceFeed) *Pricer {
 	return &Pricer{ctx: ctx, feed: feed, missed: map[string]string{}}
 }
 
-// USD returns the price of one unit of asset. A missing feed, a stale round or
-// an RPC failure all return ok=false — never a default, never $1, never the
-// price of a similar asset. The caller drops the venue.
+// Fail closed: an unpriceable asset returns ok=false and the caller drops the
+// venue. Never $1, never a similar asset's price.
 func (p *Pricer) USD(asset string) (float64, bool) {
 	if asset == "" {
 		return 0, false
@@ -69,7 +60,6 @@ func (p *Pricer) record(asset, reason string) {
 	}
 }
 
-// Unpriceable lists the assets this fetch had to drop, with the reason.
 func (p *Pricer) Unpriceable() []Unpriceable {
 	if p == nil {
 		return nil
@@ -84,7 +74,6 @@ func (p *Pricer) Unpriceable() []Unpriceable {
 	return out
 }
 
-// Unpriceable is one asset dropped for want of a usable price.
 type Unpriceable struct {
 	Asset  string `json:"asset"`
 	Reason string `json:"reason"`

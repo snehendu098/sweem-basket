@@ -14,13 +14,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/store"
 )
 
-// allocate splits totalCents across weights by the largest-remainder method.
-//
-// Naive proportional arithmetic loses or invents fractions of a cent, and a
-// split that does not sum back to what the user asked for is money we cannot
-// account for. Integer cents plus leftovers to the biggest remainders makes the
-// sum exact by construction. Shared by deposits (weights in bps) and withdraws
-// (weights in position value).
 func allocate(totalCents int64, weights []int64) []int64 {
 	cents := make([]int64, len(weights))
 	var totalWeight int64
@@ -35,7 +28,7 @@ func allocate(totalCents int64, weights []int64) []int64 {
 
 	type rem struct {
 		i    int
-		frac int64 // leftover numerator, denominator totalWeight
+		frac int64
 	}
 	rems := make([]rem, 0, len(weights))
 	var assigned int64
@@ -48,8 +41,6 @@ func allocate(totalCents int64, weights []int64) []int64 {
 		assigned += cents[i]
 		rems = append(rems, rem{i: i, frac: n % totalWeight})
 	}
-	// Stable order: bigger remainder first, then original position, so the same
-	// input always splits the same way.
 	sort.SliceStable(rems, func(a, b int) bool { return rems[a].frac > rems[b].frac })
 	for k := int64(0); k < totalCents-assigned && len(rems) > 0; k++ {
 		cents[rems[k%int64(len(rems))].i]++
@@ -65,7 +56,6 @@ func centsToUSD(cents []int64) []float64 {
 	return out
 }
 
-// splitAmounts divides a deposit across basket weights, in whole cents.
 func splitAmounts(amountUSD float64, ws []store.Weight) []float64 {
 	weights := make([]int64, len(ws))
 	for i, w := range ws {
@@ -74,8 +64,6 @@ func splitAmounts(amountUSD float64, ws []store.Weight) []float64 {
 	return centsToUSD(allocate(int64(math.Round(amountUSD*100)), weights))
 }
 
-// splitProportional divides a withdrawal across positions in proportion to what
-// each currently holds, so a partial exit leaves the basket's shape intact.
 func splitProportional(amountUSD float64, values []float64) []float64 {
 	weights := make([]int64, len(values))
 	for i, v := range values {
@@ -84,9 +72,6 @@ func splitProportional(amountUSD float64, values []float64) []float64 {
 	return centsToUSD(allocate(int64(math.Round(amountUSD*100)), weights))
 }
 
-// planLegs resolves a basket's weights against live venue data. Shared by the
-// read-only /plan preview and the /deposit write path, so the money moves
-// exactly where the preview said it would.
 func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([]PlanLeg, float64) {
 	amounts := splitAmounts(amountUSD, b.Weights)
 	legs := make([]PlanLeg, 0, len(b.Weights))
@@ -97,8 +82,6 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			WeightBps: weight.WeightBps,
 			AmountUSD: amounts[i],
 		}
-		// Price first. Routing money on an asset we cannot value means moving
-		// it on a number we invented, so an unpriceable leg never gets a venue.
 		price, perr := s.priceUSD(r.Context(), b.Chain, weight.Asset)
 		if perr != nil {
 			leg.Reason = priceReason(weight.Asset, perr)
@@ -111,10 +94,6 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			leg.AmountToken = &tokens
 		}
 
-		// Fundability before rate. A leg whose asset cannot be bought with the
-		// deposited USDC is not a worse route, it is no route: proposing it
-		// would surface as an unlisted-path error at submission, after the user
-		// has committed.
 		if serr := s.swapFundable(r.Context(), weight.Asset, b.Chain); serr != nil {
 			if errors.Is(serr, ErrNoSwapPath) {
 				leg.Reason = fmt.Sprintf("no %s swap route to %s on %s; this leg cannot be funded",
@@ -132,8 +111,6 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 		case errors.Is(err, marketdata.ErrNoVenue):
 			leg.Reason = "no venue meets the liquidity floor; funds stay idle"
 		case errors.Is(err, ErrNoRoutableVenue):
-			// Indexed venues exist, none of them executable. Say which, rather
-			// than reporting "no venue" for something the user can see a rate for.
 			leg.Reason = "no venue for this asset can be transacted by the executor; funds stay idle"
 		case err != nil:
 			s.Log.Warn("routable venue lookup", "asset", weight.Asset, "err", err)
@@ -151,32 +128,24 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 	return legs, blended
 }
 
-// LegResult is the outcome of one leg of a deposit or rebalance. Every leg is
-// reported independently — a failed leg never hides a succeeded one.
 type LegResult struct {
-	Asset       string  `json:"asset"`
-	AmountUSD   float64 `json:"amount_usd"`
-	FromVenueID string  `json:"from_venue_id,omitempty"`
-	VenueID     string  `json:"venue_id,omitempty"`
-	Project     string  `json:"project,omitempty"`
-	APY         float64 `json:"apy,omitempty"`
-	ExecutionID string  `json:"execution_id,omitempty"`
-	TxHash      string  `json:"tx_hash,omitempty"`
-	// Status is submitted | pending | failed | skipped.
-	Status string          `json:"status"`
-	Reason string          `json:"reason,omitempty"`
-	Steps  []executor.Step `json:"steps,omitempty"`
+	Asset       string          `json:"asset"`
+	AmountUSD   float64         `json:"amount_usd"`
+	FromVenueID string          `json:"from_venue_id,omitempty"`
+	VenueID     string          `json:"venue_id,omitempty"`
+	Project     string          `json:"project,omitempty"`
+	APY         float64         `json:"apy,omitempty"`
+	ExecutionID string          `json:"execution_id,omitempty"`
+	TxHash      string          `json:"tx_hash,omitempty"`
+	Status      string          `json:"status"`
+	Reason      string          `json:"reason,omitempty"`
+	Steps       []executor.Step `json:"steps,omitempty"`
 }
 
-// canExecute rejects callers the executor cannot act for. Both the delegation
-// and Privy's wallet ID are required; say which one is missing.
 func (s *Server) canExecute(w http.ResponseWriter, u store.User) bool {
 	var missing string
 	switch {
 	case !u.Delegated:
-		// Privy only issues the server wallet ID once delegation exists, so
-		// asking for the ID first would be asking for something that does not
-		// exist yet. Delegation is always the first step.
 		missing = "wallet delegation is missing; grant it in Privy, then POST /v1/me again with the wallet ID Privy returns"
 	case u.PrivyWalletID == "":
 		missing = "wallet delegation is granted but we have not been told the Privy wallet ID yet; POST /v1/me again to send it"
@@ -187,9 +156,6 @@ func (s *Server) canExecute(w http.ResponseWriter, u store.User) bool {
 	return false
 }
 
-// Leg statuses reported to the caller. Deliberately three-valued: a receipt
-// poll that timed out is not a failure, and collapsing it into one would invite
-// a second submission of money that already moved.
 const (
 	legSubmitted = "submitted"
 	legPending   = "pending"
@@ -197,24 +163,15 @@ const (
 	legSkipped   = "skipped"
 )
 
-// IdleVenueID marks a position whose funds are sitting unplaced in the user's
-// own wallet — a multi-step sequence that withdrew and then failed to
-// redeposit. The money is not lost, but it is not earning either, and the
-// position row must not keep claiming the old venue.
-// ponytail: sentinel venue ID rather than a new column; add a real `state`
-// column if positions grow more lifecycle states than "placed" and "idle".
+// ponytail: sentinel venue ID, not a column; add a real `state` column if
+// positions grow more lifecycle states than "placed" and "idle".
 const IdleVenueID = "idle:wallet"
 
-// legOutcome maps an executor reply to the row status we persist and the leg
-// status we report. Pure, so the three-way branch is testable.
 func legOutcome(resp executor.RouteResponse, err error) (dbStatus, legStatus, reason string) {
 	switch {
 	case err != nil:
 		return "failed", legFailed, err.Error()
 	case resp.Status == "pending":
-		// Receipt poll timed out. Keep the row pending: the transaction is
-		// probably still in the mempool, and calling it failed would be a lie
-		// that costs money to correct.
 		return "pending", legPending, "submitted but not yet confirmed; receipt poll timed out"
 	case resp.Status == "failed":
 		if resp.Error == "" {
@@ -228,9 +185,6 @@ func legOutcome(resp executor.RouteResponse, err error) (dbStatus, legStatus, re
 	}
 }
 
-// fundsUnplaced reports whether a sequence moved money out of its source before
-// it stopped. A rebalance is withdraw → approve → deposit: a confirmed step
-// followed by a failure leaves the funds idle in the wallet.
 func fundsUnplaced(resp executor.RouteResponse) bool {
 	for _, st := range resp.Steps {
 		if st.Outcome == "confirmed" {
@@ -240,21 +194,13 @@ func fundsUnplaced(resp executor.RouteResponse) bool {
 	return false
 }
 
-// run performs one executor call with its execution row. The row is written
-// BEFORE the call so a crash mid-flight leaves a visible `pending` row rather
-// than an invisible transaction.
 func (s *Server) run(r *http.Request, u store.User, e store.Execution, req executor.RouteRequest) (store.Execution, executor.RouteResponse, LegResult) {
 	ctx := r.Context()
 	e, err := s.Store.CreateExecution(ctx, e)
 	if err != nil {
-		// Never call the executor without a row to record it against — an
-		// untracked transaction is money nobody can account for.
 		s.Log.Error("create execution", "asset", e.Asset, "err", err)
 		return e, executor.RouteResponse{}, LegResult{Status: legFailed, Reason: "could not record execution; nothing was submitted"}
 	}
-	// The executor serves both chains and checks that every venue it is handed
-	// lives on the chain named here. Resolving the label once, here, is what
-	// makes that check meaningful: nothing downstream guesses a chain.
 	chainID, cerr := chainOf(req.Chain)
 	if cerr != nil {
 		s.Log.Error("unroutable chain", "chain", req.Chain, "asset", e.Asset, "err", cerr)
@@ -287,7 +233,6 @@ func (s *Server) run(r *http.Request, u store.User, e store.Execution, req execu
 		errMsg = &reason
 	}
 	if uerr := s.Store.UpdateExecution(ctx, e.ID, dbStatus, txHash, errMsg, steps); uerr != nil {
-		// The chain call already happened; log loudly and still report it.
 		s.Log.Error("update execution", "execution_id", e.ID, "status", dbStatus, "err", uerr)
 	}
 	return e, resp, LegResult{
@@ -299,11 +244,6 @@ func (s *Server) run(r *http.Request, u store.User, e store.Execution, req execu
 	}
 }
 
-// deposit routes a USDC deposit across a basket's weights.
-//
-// Partial failure is the normal case: legs are independent, and one failing
-// leg must not roll back or hide the others. Every leg gets its own execution
-// row and its own entry in the response.
 func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
 	if !ok {
@@ -372,8 +312,6 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		case legPending:
-			// The money may or may not have arrived. Recording a position now
-			// would claim yield the user might not be earning.
 			pending++
 			s.Log.Warn("deposit leg pending", "asset", leg.Asset, "execution_id", res.ExecutionID)
 			results = append(results, res)
@@ -391,7 +329,6 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			AmountUSD: leg.AmountUSD,
 			EntryAPY:  leg.Venue.APY,
 		}); err != nil {
-			// The money moved; only our bookkeeping failed. Say so.
 			s.Log.Error("upsert position", "asset", leg.Asset, "err", err)
 			res.Reason = "submitted, but the position record failed to save"
 		}
@@ -408,13 +345,6 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// partitionWithdrawable separates positions that sit in a venue from those
-// already idle in the user's wallet.
-//
-// Idle funds have no venue to withdraw from, so routing one would be a call
-// against a venue that is not holding the money. Excluding them from the total
-// also keeps them out of the proportional split, so a requested amount is drawn
-// entirely from positions that can actually supply it.
 func partitionWithdrawable(positions []store.Position) (withdrawable []store.Position, skipped []LegResult, available float64) {
 	withdrawable = make([]store.Position, 0, len(positions))
 	skipped = make([]LegResult, 0)
@@ -432,11 +362,6 @@ func partitionWithdrawable(positions []store.Position) (withdrawable []store.Pos
 	return withdrawable, skipped, available
 }
 
-// withdraw takes money back out of venues and into the user's own wallet.
-//
-// The counterpart to deposit, and the reason a user is never trapped: exiting a
-// subscription only stops future moves, it does not return funds. Same per-leg
-// independence, same three-way outcome, same executions trail.
 func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
 	if !ok {
@@ -473,8 +398,6 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 		amount = available
 	}
 	if amount > available+0.005 {
-		// Refuse rather than quietly withdraw less than asked: the caller must
-		// know the difference between "took 500" and "took what was there".
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf(
 			"amount_usd %.2f exceeds the %.2f held in this basket", amount, available))
 		return
@@ -532,8 +455,6 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		case legPending:
-			// The funds may or may not have left the venue. Reducing the
-			// position now would understate what the user still holds there.
 			pending++
 			s.Log.Warn("withdraw leg pending", "asset", p.Asset, "execution_id", res.ExecutionID)
 			results = append(results, res)
@@ -541,8 +462,6 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 		}
 		withdrawnUSD += legUSD
 
-		// Round to the cent so a fully drained position does not survive as a
-		// fraction-of-a-cent ghost row.
 		remaining := math.Round((p.AmountUSD-legUSD)*100) / 100
 		if remaining <= 0 {
 			if err := s.Store.DeletePosition(r.Context(), p.ID); err != nil {
@@ -569,8 +488,6 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// rebalance moves positions whose drift exceeds the threshold into the best
-// venue available now. Same per-leg independence as deposit.
 func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
 	if !ok {
@@ -580,7 +497,6 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	basketID := r.PathValue("id")
-	// Distinguish automated moves from ones the user asked for.
 	actor := "user"
 	if c, ok := auth.FromContext(r.Context()); ok && c.ViaKeeper {
 		actor = "keeper"
@@ -621,8 +537,6 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 			res.Reason = note
 		}
 
-		// Funds already sitting idle in the wallet have nothing to withdraw —
-		// that is a plain deposit, not a venue-to-venue move.
 		action, fromVenue := "rebalance", p.VenueID
 		if p.VenueID == IdleVenueID {
 			action, fromVenue = "deposit", ""
@@ -653,9 +567,6 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 			failed++
 			s.Log.Warn("rebalance leg failed", "actor", actor, "asset", p.Asset, "execution_id", res.ExecutionID, "reason", res.Reason)
 			if fundsUnplaced(resp) {
-				// The withdraw landed but the redeposit did not. The funds are
-				// idle in the user's wallet — the position must say so rather
-				// than keep claiming a venue that no longer holds the money.
 				res.VenueID, res.Reason = IdleVenueID,
 					"withdrew but failed to redeposit; funds are idle in your wallet"
 				p.VenueID, p.Project, p.EntryAPY = IdleVenueID, "wallet", 0
@@ -666,8 +577,6 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		case legPending:
-			// Unknown where the money sits. Leave the position on its old venue
-			// rather than guess; the executions row keeps the tx hash.
 			pending++
 			s.Log.Warn("rebalance leg pending", "asset", p.Asset, "execution_id", res.ExecutionID)
 			results = append(results, res)
@@ -693,9 +602,6 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// settledStatus is 200 only when every leg reached a settled, successful state.
-// A pending leg is as unsettled as a failed one: the caller must not assume the
-// money arrived.
 func settledStatus(failed, pending int) int {
 	if failed > 0 || pending > 0 {
 		return http.StatusMultiStatus
@@ -703,6 +609,4 @@ func settledStatus(failed, pending int) int {
 	return http.StatusOK
 }
 
-// shouldRebalance gates on drift only. Below the threshold the gas and slippage
-// of moving cost more than the extra yield is worth.
 func shouldRebalance(drift, threshold float64) bool { return drift > threshold }

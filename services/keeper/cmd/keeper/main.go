@@ -1,9 +1,3 @@
-// Command keeper watches every subscriber's positions and triggers a rebalance
-// when moving the money is worth more than it costs.
-//
-// It decides *when*. The wallet service still does *how*: the keeper never
-// calls the executor and never signs anything, so it can be restarted,
-// duplicated or crashed without putting funds at risk.
 package main
 
 import (
@@ -32,8 +26,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/store"
 )
 
-// rpcURL is per chain: one node cannot answer for two networks, and there is
-// deliberately no shared BASE_RPC_URL fallback.
 func rpcURL(chainID int) string {
 	def := "https://mainnet.base.org"
 	if chainID == chains.BaseSepolia {
@@ -42,7 +34,6 @@ func rpcURL(chainID int) string {
 	return config.GetEnv(fmt.Sprintf("BASE_RPC_URL_%d", chainID), def)
 }
 
-// venuesUpdated is the channel market-data publishes to after each poll cycle.
 const venuesUpdated = "venues:updated"
 
 func main() {
@@ -66,8 +57,6 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 	defer stop()
 
 	secret := config.GetEnv("KEEPER_SECRET", "")
-	// Without a shared secret the keeper cannot authenticate to the wallet
-	// service at all, so the only honest mode is dry run. Refuse to pretend.
 	dryRun := dryRunFlag || config.GetEnv("DRY_RUN", "") == "true" || secret == ""
 	if !dryRun && secret == "" {
 		return errors.New("KEEPER_SECRET is required to run live; unset it to run in dry-run")
@@ -82,18 +71,12 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 	}
 	defer db.Close()
 
-	// One node and one gas estimator per chain. Both chains are served at once,
-	// and a position's own chain decides which pair prices it: gas price and
-	// ETH/USD both differ per chain, so borrowing one for the other is a
-	// confident wrong number, which is worse here than a missing one.
 	nodes := rpc.Set{}
 	costs := gas.Set{}
 	override := config.GetEnvFloat("GAS_COST_USD", 0)
 	for _, chainID := range chains.Supported() {
 		node := rpc.New(rpcURL(chainID))
 		nodes[chainID] = node
-		// The ETH/USD aggregator differs per chain, so it comes from the same
-		// verified table the price service uses instead of a second constant.
 		ethUSD, _ := prices.FeedsFor(chainID)
 		feed := ethUSD["ETH"].Address
 		if feed == "" {
@@ -105,7 +88,6 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 			Units:    uint64(config.GetEnvInt("GAS_UNITS_REBALANCE", int(gas.UnitsRebalance))),
 			MaxAge:   config.GetEnvDuration("PRICE_MAX_AGE", time.Hour),
 			CacheTTL: config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
-			// Tests and dry runs only. Never a fallback for a failed live fetch.
 			Override: override,
 		}
 	}
@@ -123,23 +105,15 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 		Receipts: nodes,
 		Log:      log,
 		Policy: policy.Params{
-			MinDriftAPY: config.GetEnvFloat("MIN_DRIFT_APY", 0.5),
-			// Testnet-scaled: a faucet-funded demo basket is a few dollars, and a
-			// $50 floor would veto every rebalance as "too small to bother".
+			MinDriftAPY:    config.GetEnvFloat("MIN_DRIFT_APY", 0.5),
 			MinPositionUSD: config.GetEnvFloat("MIN_POSITION_USD", 5),
 			MinHold:        config.GetEnvDuration("MIN_HOLD_PERIOD", 6*time.Hour),
 			RewardDiscount: config.GetEnvFloat("REWARD_DISCOUNT", 0.5),
 			SafetyMargin:   config.GetEnvFloat("SAFETY_MARGIN", 1.5),
-			// Counts legs, not passes: `executions` holds one row per leg, so a
-			// 3-asset basket spends 3 of these on a single rebalance.
-			MaxPerDay: config.GetEnvInt("MAX_REBALANCES_PER_DAY", 12),
-			// Price a move over how long we expect to hold it, not over the
-			// minimum we are allowed to. Defaulting to MinHold understates the
-			// gain by orders of magnitude and only looked survivable because
-			// Base gas is ~$0.01; the same math on an expensive chain never moves.
-			Horizon: config.GetEnvDuration("BREAKEVEN_HORIZON", 30*24*time.Hour),
+			MaxPerDay:      config.GetEnvInt("MAX_REBALANCES_PER_DAY", 12),
+			Horizon:        config.GetEnvDuration("BREAKEVEN_HORIZON", 30*24*time.Hour),
 		},
-		MinVenueTVL:   config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000), // testnet-scaled, see market-data MIN_TVL_USD
+		MinVenueTVL:   config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000),
 		DryRun:        dryRun,
 		PendingMinAge: config.GetEnvDuration("PENDING_SWEEP_MIN_AGE", 2*time.Minute),
 		PendingGiveUp: config.GetEnvDuration("PENDING_SWEEP_GIVE_UP", 24*time.Hour),
@@ -148,8 +122,6 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 	interval := config.GetEnvDuration("KEEPER_INTERVAL", 5*time.Minute)
 	debounce := config.GetEnvDuration("KEEPER_DEBOUNCE", 30*time.Second)
 
-	// Capacity 1: notifications arriving during a pass coalesce into exactly
-	// one follow-up run instead of queueing up a stampede.
 	trigger := make(chan string, 1)
 	go watchVenues(ctx, log, trigger)
 
@@ -186,9 +158,6 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 	}
 }
 
-// watchVenues turns market-data's pubsub into pass triggers. New rate data is
-// the natural moment to re-evaluate; the periodic tick is only the safety net
-// for when this subscription drops.
 func watchVenues(ctx context.Context, log *slog.Logger, trigger chan<- string) {
 	rdb, err := redisclient.New()
 	if err != nil {
@@ -208,7 +177,7 @@ func watchVenues(ctx context.Context, log *slog.Logger, trigger chan<- string) {
 		_ = json.Unmarshal([]byte(msg.Payload), &payload)
 		select {
 		case trigger <- fmt.Sprintf("venues:updated(count=%d)", payload.Count):
-		default: // a pass is already pending; one is enough
+		default:
 		}
 	}
 }

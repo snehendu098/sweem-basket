@@ -6,11 +6,6 @@ import { Picker } from "@/components/ui";
 
 export const ALL_ASSETS = "__all__";
 
-/**
- * Two filters, both backed by data we have: the assets a basket weights, and
- * its name. Network and status dropdowns are omitted — one chain, and baskets
- * carry no status field, so they would be dead controls.
- */
 export function FilterBar({
   asset,
   assets,
@@ -19,7 +14,6 @@ export function FilterBar({
   onSearchChange,
 }: {
   asset: string;
-  /** Asset tickers that appear in at least one listed basket. */
   assets: string[];
   search: string;
   onAssetChange: (v: string) => void;

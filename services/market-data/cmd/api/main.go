@@ -1,4 +1,3 @@
-// Command api serves the read-side HTTP API over the venue data in Redis.
 package main
 
 import (
@@ -25,11 +24,8 @@ import (
 )
 
 type server struct {
-	rdb   *redis.Client
-	store *store.Store
-	// counts is the per-chain live venue count, kept warm by the
-	// venues:updated subscription. Reported per chain because "42 venues" says
-	// nothing about whether mainnet is actually being served.
+	rdb    *redis.Client
+	store  *store.Store
 	mu     sync.Mutex
 	counts map[string]int
 }
@@ -89,7 +85,6 @@ func main() {
 	slog.Info("api stopped")
 }
 
-// watchUpdates keeps a live Redis subscription so /health reports a fresh count.
 func (s *server) watchUpdates(ctx context.Context) {
 	sub := s.rdb.Subscribe(ctx, store.ChanUpdate)
 	defer sub.Close()
@@ -218,7 +213,6 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, map[string]any{"assets": assets, "count": len(assets)})
 }
 
-// sources exposes the per-protocol fetch status the publisher records in Redis.
 func (s *server) sources(w http.ResponseWriter, r *http.Request) {
 	chain, err := chainParam(r.URL.Query().Get("chain"))
 	if err != nil {
@@ -244,10 +238,6 @@ func (s *server) sources(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, map[string]any{"sources": statuses, "count": len(statuses)})
 }
 
-// chainParam canonicalises ?chain=. Empty means every chain we serve; an
-// unrecognised label is a 400 rather than an empty result set, because an empty
-// list reads as "this chain has no venues" when it really means "you asked for
-// a chain that does not exist here".
 func chainParam(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", nil
@@ -259,7 +249,6 @@ func chainParam(raw string) (string, error) {
 	return label, nil
 }
 
-// filterByChain narrows the stored per-adapter status rows to one chain.
 func filterByChain(statuses []json.RawMessage, chain string) []json.RawMessage {
 	if chain == "" {
 		return statuses

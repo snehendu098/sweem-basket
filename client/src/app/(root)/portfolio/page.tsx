@@ -40,10 +40,6 @@ export default function PortfolioPage() {
   const { notify, detail, clear } = useSettleToast();
 
   const p = portfolio.data;
-  // One account spans both Base networks. A Sepolia position added into a
-  // mainnet total is a testnet dollar pretending to be a real one, so the
-  // selected chain filters the rows — and then the totals are recomputed from
-  // those rows rather than reusing the API's all-chain figures.
   const all = p?.positions ?? [];
   const positions = all.filter((h) => sameChain(h.chain, chain.label));
   const split = positions.length !== all.length;
@@ -60,7 +56,6 @@ export default function PortfolioPage() {
     .filter((h) => h.venue_id === IDLE_VENUE_ID)
     .reduce((s, h) => s + h.amount_usd, 0);
 
-  // One section per basket the user actually holds something in.
   const groups = new Map<string, Holding[]>();
   for (const h of positions) {
     const g = groups.get(h.basket_id);
@@ -74,8 +69,6 @@ export default function PortfolioPage() {
     setBusy(basketId);
     clear();
     try {
-      // Same route the keeper calls; with a user token it authenticates as the
-      // user, and 207 is a normal partial outcome exactly like deposit.
       const res = await api<SettleResult>(
         `/v1/baskets/${basketId}/rebalance`,
         { method: "POST" },
@@ -83,7 +76,6 @@ export default function PortfolioPage() {
       notify(res.status, res.data, {
         key: basketId,
         verb: "Rebalanced",
-        // A rebalance that moved nothing is a success, not an empty report.
         successTitle:
           res.data.moved_legs === 0
             ? `Nothing to move — no position cleared the drift threshold${
@@ -155,7 +147,6 @@ export default function PortfolioPage() {
         {p && positions.length === 0 && !portfolio.loading && (
           <Panel>
             <div className="flex items-center justify-between p-5 text-sm">
-              {/* Says which network is empty: the other one may not be. */}
               <span className="text-muted-foreground">
                 No positions on {chain.name} yet.
               </span>
@@ -170,8 +161,6 @@ export default function PortfolioPage() {
         )}
 
         {[...groups].map(([basketId, holdings]) => {
-          // The best drift in the basket is what a rebalance would act on, so
-          // it explains in advance whether the button will move anything.
           const bestDrift = holdings.reduce(
             (m, h) => (h.venue_id === IDLE_VENUE_ID ? m : Math.max(m, h.drift_apy)),
             0,
@@ -234,7 +223,6 @@ export default function PortfolioPage() {
 
 function Row({ h }: { h: Holding }) {
   const idle = h.venue_id === IDLE_VENUE_ID;
-  // Drift is only meaningful against a placed position.
   const drift = !idle && h.drift_apy > 0;
   return (
     <li className="p-5">
@@ -254,11 +242,6 @@ function Row({ h }: { h: Holding }) {
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>entry {fmtPct(h.entry_apy)}</span>
-        {/* A value the API could not produce is never turned into a number.
-            The em dash stays rather than the cell disappearing: the amount on
-            the line above is our own record, and a silently absent on-chain
-            figure would read as one that agrees. The reason is still on the
-            title, for anyone who wants it. */}
         <span
           className="tnum"
           title={

@@ -1,5 +1,3 @@
-// Package store is the Postgres persistence layer for the wallet service.
-// Plain SQL over pgx — no ORM.
 package store
 
 import (
@@ -32,11 +30,6 @@ func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// --- users ---
-
-// UpsertUser resolves a Privy DID to a local user, creating it on first sight.
-// privyWalletID is optional on the client's first call, so an empty value must
-// never blank out an ID we already hold.
 func (s *Store) UpsertUser(ctx context.Context, did, wallet, privyWalletID string) (User, error) {
 	const q = `
 		INSERT INTO users (privy_did, wallet_address, privy_wallet_id)
@@ -68,11 +61,6 @@ func (s *Store) SetDelegated(ctx context.Context, userID string, delegated bool)
 	return err
 }
 
-// --- baskets ---
-
-// CreateBasket writes the basket and its weights in one transaction.
-// Weights must sum to exactly 10000 bps; that invariant is enforced here
-// because Postgres cannot express a cross-row CHECK.
 func (s *Store) CreateBasket(ctx context.Context, b Basket) (Basket, error) {
 	if err := ValidateWeights(b.Weights); err != nil {
 		return Basket{}, err
@@ -139,7 +127,6 @@ func (s *Store) weights(ctx context.Context, basketID string) ([]Weight, error) 
 	return out, rows.Err()
 }
 
-// ListBaskets returns public baskets, or every basket owned by ownerID when set.
 func (s *Store) ListBaskets(ctx context.Context, ownerID string, publicOnly bool, limit int) ([]Basket, error) {
 	q := `SELECT id, creator_id, name, description, chain, is_public, fee_bps, created_at FROM baskets`
 	args := []any{}
@@ -171,8 +158,6 @@ func (s *Store) ListBaskets(ctx context.Context, ownerID string, publicOnly bool
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// One query for every basket's weights, not one per basket. The list is
-	// what the explore page renders, so the weights must come with it.
 	ids := make([]string, len(out))
 	for i := range out {
 		ids[i] = out[i].ID
@@ -185,14 +170,12 @@ func (s *Store) ListBaskets(ctx context.Context, ownerID string, publicOnly bool
 		if w, ok := byBasket[out[i].ID]; ok {
 			out[i].Weights = w
 		} else {
-			out[i].Weights = []Weight{} // never marshal as null
+			out[i].Weights = []Weight{}
 		}
 	}
 	return out, nil
 }
 
-// weightsFor fetches the weights of many baskets in one round trip and groups
-// them in Go.
 func (s *Store) weightsFor(ctx context.Context, basketIDs []string) (map[string][]Weight, error) {
 	if len(basketIDs) == 0 {
 		return map[string][]Weight{}, nil
@@ -219,15 +202,12 @@ func (s *Store) weightsFor(ctx context.Context, basketIDs []string) (map[string]
 	return groupWeights(flat), nil
 }
 
-// basketWeight is one row of the batch weights query.
 type basketWeight struct {
 	BasketID  string
 	Asset     string
 	WeightBps int
 }
 
-// groupWeights turns the flat rows into per-basket slices, preserving the
-// query's ordering within each basket.
 func groupWeights(rows []basketWeight) map[string][]Weight {
 	out := make(map[string][]Weight)
 	for _, r := range rows {
@@ -236,8 +216,6 @@ func groupWeights(rows []basketWeight) map[string][]Weight {
 	return out
 }
 
-// SubscribedTo reports which of basketIDs the user is actively subscribed to.
-// One query, so the caller can annotate a whole list without an N+1.
 func (s *Store) SubscribedTo(ctx context.Context, userID string, basketIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if userID == "" || len(basketIDs) == 0 {
@@ -261,8 +239,6 @@ func (s *Store) SubscribedTo(ctx context.Context, userID string, basketIDs []str
 	return out, rows.Err()
 }
 
-// --- subscriptions ---
-
 func (s *Store) Subscribe(ctx context.Context, userID, basketID string) (Subscription, error) {
 	const q = `
 		INSERT INTO subscriptions (user_id, basket_id) VALUES ($1,$2)
@@ -281,9 +257,6 @@ func (s *Store) Unsubscribe(ctx context.Context, userID, basketID string) error 
 	return err
 }
 
-// --- positions ---
-
-// UpsertPosition records where a user's money for one asset currently sits.
 func (s *Store) UpsertPosition(ctx context.Context, p Position) error {
 	const q = `
 		INSERT INTO positions (user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, updated_at)
@@ -300,14 +273,11 @@ func (s *Store) UpsertPosition(ctx context.Context, p Position) error {
 	return err
 }
 
-// DeletePosition removes a position that has been fully withdrawn. Leaving a
-// zero row would keep claiming the user holds something they do not.
 func (s *Store) DeletePosition(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM positions WHERE id = $1`, id)
 	return err
 }
 
-// Positions returns the user's positions. basketID is optional.
 func (s *Store) Positions(ctx context.Context, userID, basketID string) ([]Position, error) {
 	q := `SELECT id, user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, updated_at
 	      FROM positions WHERE user_id = $1`
@@ -335,8 +305,6 @@ func (s *Store) Positions(ctx context.Context, userID, basketID string) ([]Posit
 	return out, rows.Err()
 }
 
-// --- executions ---
-
 func (s *Store) CreateExecution(ctx context.Context, e Execution) (Execution, error) {
 	const q = `
 		INSERT INTO executions (user_id, basket_id, kind, asset, from_venue, to_venue, amount_usd, status)
@@ -348,7 +316,6 @@ func (s *Store) CreateExecution(ctx context.Context, e Execution) (Execution, er
 	return e, err
 }
 
-// UpdateExecution records the outcome of a route call. steps may be nil.
 func (s *Store) UpdateExecution(ctx context.Context, id, status string, txHash, errMsg *string, steps json.RawMessage) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE executions SET status=$2, tx_hash=COALESCE($3,tx_hash), error=$4,

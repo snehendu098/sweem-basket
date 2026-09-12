@@ -1,32 +1,3 @@
-// Command gen-venues writes the executor's venue allowlist from indexed data
-// plus on-chain verification.
-//
-// Why this exists: the allowlist was hand-written, so it held a fraction of the
-// venues that exist, and every venue missing from it is an asset a user cannot
-// put in a basket. Hand-curation was the ceiling, not the security model.
-//
-// What it does NOT do is let the executor fetch its allowlist at runtime. The
-// security property is that the set of addresses the executor will call cannot
-// be influenced by the request path — or by a compromised indexer. This is a
-// build-time tool: it writes a file, a human reads the diff, the file ships
-// inside the executor image.
-//
-// A venue is emitted only when ALL of these hold:
-//
-//  1. encodable   — its protocol maps to a VenueKind the executor implements
-//  2. priceable   — its underlying has a verified Chainlink feed on that chain
-//  3. liquid      — it clears the TVL floor (enforced by the market-data filter)
-//  4. verified    — symbol(), decimals() and a protocol identity check pass
-//     on chain: Aave via the Pool's getReservesList(), Comet via
-//     baseToken(), ERC-4626 via asset(), Moonwell via isMToken()
-//     plus underlying()
-//  5. id matches  — the emitted id is byte-for-byte what venue.MakeID produces,
-//     asserted rather than assumed
-//
-// Usage (from the repo root, with the same .env the services use):
-//
-//	go run ./services/market-data/cmd/gen-venues -out executor/venues.json
-//	go run ./services/market-data/cmd/gen-venues -dry-run   # print, write nothing
 package main
 
 import (
@@ -46,7 +17,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
-// entry is one allowlist row, matching the executor's `Venue` exactly.
 type entry struct {
 	ID            string `json:"id"`
 	Kind          string `json:"kind"`
@@ -57,7 +27,6 @@ type entry struct {
 	Symbol        string `json:"symbol"`
 }
 
-// file is the on-disk shape: provenance plus the rows.
 type file struct {
 	Generated generated `json:"_generated"`
 	Venues    []entry   `json:"venues"`
@@ -71,34 +40,23 @@ type generated struct {
 	Rules []string `json:"rules"`
 }
 
-// skip records a candidate that did not make it, and why. The list is as
-// useful as the output: it names exactly what a price feed or a new VenueKind
-// would unlock.
 type skip struct {
 	ID     string
 	Chain  string
 	Reason string
 }
 
-// kinds maps a market-data project onto the executor's VenueKind. A protocol
-// absent from here cannot be encoded, so its venues are skipped rather than
-// emitted and refused later.
 var kinds = map[string]string{
-	"aave-v3":     "aave_v3",
-	"compound-v3": "compound_v3",
-	"morpho-blue": "erc4626",
-	"moonwell":    "ctoken",
-	// A hold venue has no protocol call at all: the position is the token in
-	// the user's own wallet, so target IS the asset and the executor's
-	// "target must not be the asset" rule explicitly exempts this kind.
+	"aave-v3":           "aave_v3",
+	"compound-v3":       "compound_v3",
+	"morpho-blue":       "erc4626",
+	"moonwell":          "ctoken",
 	source.ProtocolHold: "hold",
 }
 
 func main() {
 	out := flag.String("out", "executor/venues.json", "file to write")
 	dryRun := flag.Bool("dry-run", false, "print the result, write nothing")
-	// -1 means "use the chain's own rule", which is the only setting that keeps
-	// the allowlist and the published venue set agreeing with each other.
 	minTVL := flag.Float64("min-tvl", -1, "override the chain's USD TVL floor")
 	flag.Parse()
 
@@ -165,7 +123,6 @@ func main() {
 	fmt.Fprintf(os.Stderr, "wrote %s (%d venues)\n", *out, len(entries))
 }
 
-// forChain indexes one chain, then verifies every candidate on that chain.
 func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]entry, []skip, error) {
 	filter := source.FilterFor(c)
 	if minTVLOverride >= 0 {
@@ -185,14 +142,6 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 		return nil, nil, err
 	}
 
-	// The generator has to see exactly what the publisher publishes. Aave,
-	// Compound and the hold venues are read straight off the chain now, so
-	// drawing candidates from the subgraph alone would omit every hold venue
-	// from the allowlist — measured correctly and then unroutable. A venue the
-	// publisher serves but the generator omits cannot be routed to; a venue the
-	// generator emits but the publisher never serves is dead weight. Same two
-	// sources, same source.Reconcile, so the two cannot disagree about what a
-	// venue is.
 	live, err := source.NewRPC(c, node, filter, feed)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARN  %s: no direct rate source: %v\n", c.Label, err)
@@ -202,14 +151,11 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 		c.Label, filter.MinTVLUsd, filter.MaxAPY, filter.AllowZeroAPY)
 	indexed, err := src.Fetch(ctx)
 	if err != nil {
-		// Every adapter failing is a broken run, not an empty chain.
 		return nil, nil, err
 	}
 	var direct []venue.Venue
 	if live != nil {
 		if direct, err = live.Fetch(ctx); err != nil {
-			// One source down still leaves a usable allowlist from the other;
-			// it is the union that would be wrong to fabricate.
 			fmt.Fprintf(os.Stderr, "WARN  %s: direct rate source failed: %v\n", c.Label, err)
 		}
 	}
@@ -228,9 +174,6 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 
 	chainFeeds, ratios := prices.FeedsFor(c.ID)
 	rpc := source.NewCaller(node)
-	// A build-time tool can afford to be slow, and a public Base node cannot
-	// afford a burst: a 429 that reads as a failed verification would quietly
-	// shrink the allowlist.
 	rpc.MinInterval = 120 * time.Millisecond
 	var (
 		out     []entry
@@ -242,10 +185,6 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 			skipped = append(skipped, skip{v.ID, c.Label, "no VenueKind encodes " + v.Project})
 			continue
 		}
-		// Rule 2, checked explicitly rather than inherited: Aave prices some
-		// reserves from its own oracle, so a venue can survive the pipeline
-		// with no Chainlink feed of ours. Routing into one would mean holding a
-		// position we cannot value.
 		asset := strings.ToUpper(v.Asset)
 		if _, direct := chainFeeds[asset]; !direct {
 			if _, composed := ratios[asset]; !composed {
@@ -264,9 +203,6 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 	return out, skipped, nil
 }
 
-// verify resolves a venue's target and underlying, confirms both on chain, and
-// re-derives the id. Any failure returns an error and the venue is omitted —
-// an unverified address is a fabricated one.
 func verify(ctx context.Context, rpc *source.Caller, c source.Chain, v venue.Venue, kind string) (entry, error) {
 	var target, underlying string
 	var err error
@@ -281,9 +217,6 @@ func verify(ctx context.Context, rpc *source.Caller, c source.Chain, v venue.Ven
 		target = v.PoolID
 		underlying, err = rpc.Address(ctx, target, source.SelAsset)
 	case "hold":
-		// Nothing is ever called on a hold venue, so there is no target to
-		// resolve and no identity check beyond the token answering symbol()
-		// and decimals() below.
 		target, underlying = v.PoolID, v.PoolID
 	case "ctoken":
 		target = v.PoolID
@@ -309,22 +242,7 @@ func verify(ctx context.Context, rpc *source.Caller, c source.Chain, v venue.Ven
 	if err != nil {
 		return entry{}, fmt.Errorf("underlying decimals(): %w", err)
 	}
-	// The executor matches a venue's symbol against the basket's asset name and
-	// against the swap allowlist, and both of those spell a token the way the
-	// token spells itself — swaps.json says "wstETH", not "WSTETH". So the
-	// emitted symbol is the on-chain symbol() verbatim. Upper-casing it here is
-	// what made every hold venue unroutable: the comparison is exact, so
-	// "WSTETH" matches no swap path and no basket asset.
-	//
-	// Market-data's canonical UPPER-CASE form stays what it always was — an
-	// internal lookup key for ResolveAsset, the Chainlink feed tables and the
-	// apy:<chain>:<ASSET> zsets — and the two are reconciled here: the chain
-	// must be reporting the token we indexed, case aside, or we have the wrong
-	// contract.
 	if strings.EqualFold(symbol, v.Asset) && symbol != v.Asset {
-		// Both spellings reach the executor — this one as venues.json's symbol,
-		// the index's as the basket asset — and it compares them with !=. The
-		// chain wins, and the drift is named so the asset table can be fixed.
 		fmt.Fprintf(os.Stderr, "WARN  %s: chain says %q, index says %q; emitting the chain's spelling\n",
 			v.ID, symbol, v.Asset)
 	}
@@ -335,7 +253,6 @@ func verify(ctx context.Context, rpc *source.Caller, c source.Chain, v venue.Ven
 		return entry{}, fmt.Errorf("target equals the asset")
 	}
 
-	// Rule 5: routing keys on this id, and a mismatch is silent and miserable.
 	id := venue.MakeID(c.Label, v.Project, v.PoolID)
 	if id != v.ID {
 		return entry{}, fmt.Errorf("id %s does not match MakeID output %s", v.ID, id)
@@ -355,16 +272,10 @@ func verify(ctx context.Context, rpc *source.Caller, c source.Chain, v venue.Ven
 	}, nil
 }
 
-// aaveTarget resolves the Pool for a reserve and proves the reserve belongs to
-// it. Aave's subgraph reserve id is `underlying + addressesProvider`, so the
-// Pool is derived from the id's own provider half via getPool() — never
-// reconstructed from a constant. The short id form (our Base Sepolia
-// deployment) carries only the underlying, so its Pool comes from the subgraph
-// and is then checked the same way.
 func aaveTarget(ctx context.Context, rpc *source.Caller, c source.Chain, poolID string) (target, underlying string, err error) {
 	raw := strings.TrimPrefix(strings.ToLower(poolID), "0x")
 	switch len(raw) {
-	case 80: // underlying + provider
+	case 80:
 		underlying, provider := "0x"+raw[:40], "0x"+raw[40:]
 		target, err = rpc.Address(ctx, provider, source.SelGetPool)
 		if err != nil {
@@ -374,7 +285,7 @@ func aaveTarget(ctx context.Context, rpc *source.Caller, c source.Chain, poolID 
 			return "", "", err
 		}
 		return target, underlying, nil
-	case 40: // underlying only; the Pool must come from the index
+	case 40:
 		underlying = "0x" + raw
 		pool, ok := aavePool(ctx, c, underlying)
 		if !ok {
@@ -389,8 +300,6 @@ func aaveTarget(ctx context.Context, rpc *source.Caller, c source.Chain, poolID 
 	}
 }
 
-// aaveListsReserve is the identity check: the Pool must actually list this
-// reserve. It is what stops a plausible-looking address from being emitted.
 func aaveListsReserve(ctx context.Context, rpc *source.Caller, pool, underlying string) error {
 	list, err := rpc.AddressList(ctx, pool, source.SelGetReservesList)
 	if err != nil {

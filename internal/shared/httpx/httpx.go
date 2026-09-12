@@ -1,4 +1,3 @@
-// Package httpx holds JSON response helpers and the shared error envelope.
 package httpx
 
 import (
@@ -7,7 +6,6 @@ import (
 	"net/http"
 )
 
-// Envelope is the shape of every response body.
 type Envelope struct {
 	Data  any    `json:"data,omitempty"`
 	Error *Error `json:"error,omitempty"`
@@ -32,12 +30,6 @@ func Fail(w http.ResponseWriter, status int, code, msg string) {
 	JSON(w, status, Envelope{Error: &Error{Code: code, Message: msg}})
 }
 
-// CORS allows browser clients to call this API. Origins come from the
-// CORS_ORIGINS env var (comma-separated); "*" allows any origin.
-//
-// Credentials are never allowed: these APIs authenticate with a bearer token
-// the client already holds, not with cookies, so echoing an arbitrary origin
-// back with credentials would be a needless hole.
 func CORS(origins []string, next http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(origins))
 	any := false

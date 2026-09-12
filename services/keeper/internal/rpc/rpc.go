@@ -1,6 +1,3 @@
-// Package rpc is a minimal Ethereum JSON-RPC client. One client serves both
-// the gas pricing and the pending-execution sweeper, so both read the same
-// node configured by BASE_RPC_URL.
 package rpc
 
 import (
@@ -65,10 +62,6 @@ func (c *Client) do(ctx context.Context, method string, params []any, out any) e
 	return json.Unmarshal(env.Result, out)
 }
 
-// GasPriceWei returns a percentile-based estimate: the next block's base fee
-// plus the median 50th-percentile priority tip over the last few blocks. Using
-// eth_feeHistory rather than eth_gasPrice keeps one outlier block from skewing
-// the number the breakeven is priced on.
 func (c *Client) GasPriceWei(ctx context.Context) (*big.Int, error) {
 	var out struct {
 		BaseFeePerGas []string   `json:"baseFeePerGas"`
@@ -80,7 +73,6 @@ func (c *Client) GasPriceWei(ctx context.Context) (*big.Int, error) {
 	if len(out.BaseFeePerGas) == 0 {
 		return nil, fmt.Errorf("rpc: eth_feeHistory returned no base fee")
 	}
-	// The last entry is the *next* block's base fee — the one we would pay.
 	base, err := parseHexBig(out.BaseFeePerGas[len(out.BaseFeePerGas)-1])
 	if err != nil {
 		return nil, err
@@ -103,8 +95,6 @@ func (c *Client) GasPriceWei(ctx context.Context) (*big.Int, error) {
 	return new(big.Int).Add(base, tips[len(tips)/2]), nil
 }
 
-// Call performs an eth_call against the latest block and returns the raw
-// return data.
 func (c *Client) Call(ctx context.Context, to, data string) ([]byte, error) {
 	var out string
 	if err := c.do(ctx, "eth_call", []any{map[string]string{"to": to, "data": data}, "latest"}, &out); err != nil {
@@ -113,18 +103,14 @@ func (c *Client) Call(ctx context.Context, to, data string) ([]byte, error) {
 	return hex.DecodeString(strings.TrimPrefix(out, "0x"))
 }
 
-// Receipt is the slice of a transaction receipt the sweeper needs.
 type Receipt struct {
-	Status      string `json:"status"` // 0x1 success, 0x0 reverted
+	Status      string `json:"status"`
 	BlockNumber string `json:"blockNumber"`
 	TxHash      string `json:"transactionHash"`
 }
 
-// Success reports whether the transaction executed without reverting.
 func (r Receipt) Success() bool { return r.Status == "0x1" }
 
-// TransactionReceipt returns nil, nil when the node has no receipt yet — the
-// transaction is still unmined, which is not an error.
 func (c *Client) TransactionReceipt(ctx context.Context, txHash string) (*Receipt, error) {
 	var out *Receipt
 	if err := c.do(ctx, "eth_getTransactionReceipt", []any{txHash}, &out); err != nil {

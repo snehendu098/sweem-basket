@@ -1,6 +1,3 @@
-// Package engine runs the keeper's evaluation pass: read positions, price the
-// alternatives, apply policy, and ask the wallet service to move what is worth
-// moving. The keeper decides *when*; the wallet service still does *how*.
 package engine
 
 import (
@@ -14,7 +11,6 @@ import (
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/store"
 )
 
-// Deps are injected as interfaces so a pass can be driven against doubles.
 type (
 	Reader interface {
 		ActiveSubscriptions(ctx context.Context) ([]store.Subscription, error)
@@ -30,9 +26,6 @@ type (
 	Rebalancer interface {
 		Rebalance(ctx context.Context, basketID, privyDID string) (client.RebalanceResult, error)
 	}
-	// Coster prices one rebalance in USD from live chain data, on the chain the
-	// move would happen on — gas and ETH price are both per chain. It returns
-	// an error rather than a guess when an input is missing or stale.
 	Coster interface {
 		CostUSD(ctx context.Context, chainID int) (float64, error)
 	}
@@ -47,42 +40,31 @@ type Engine struct {
 	Log      *slog.Logger
 	Policy   policy.Params
 
-	MinVenueTVL float64
-	DryRun      bool
-	// PendingMinAge skips rows too young to have mined; PendingGiveUp is how
-	// long an unobserved transaction is tolerated before it is called failed.
+	MinVenueTVL   float64
+	DryRun        bool
 	PendingMinAge time.Duration
 	PendingGiveUp time.Duration
-	Now           func() time.Time // overridable in tests
+	Now           func() time.Time
 
 	stats Stats
 }
 
-// Stats is the audit surface: what the last pass looked at and what it did.
 type Stats struct {
-	Passes        int            `json:"passes"`
-	LastPassAt    time.Time      `json:"last_pass_at"`
-	LastPassMS    int64          `json:"last_pass_ms"`
-	Subscriptions int            `json:"subscriptions_evaluated"`
-	LegsEvaluated int            `json:"legs_evaluated"`
-	LegsMoved     int            `json:"legs_moved"`
-	LegsSkipped   map[string]int `json:"legs_skipped_by_reason"`
-	Errors        int            `json:"errors"`
-	LastError     string         `json:"last_error,omitempty"`
-	// GasCostUSD is the live cost the breakeven was priced on this pass, per
-	// chain label. Two chains cost different amounts to move on, so one number
-	// would be a number for the wrong chain half the time.
-	GasCostUSD map[string]float64 `json:"gas_cost_usd"`
-	Sweep      SweepStats         `json:"sweep"`
+	Passes        int                `json:"passes"`
+	LastPassAt    time.Time          `json:"last_pass_at"`
+	LastPassMS    int64              `json:"last_pass_ms"`
+	Subscriptions int                `json:"subscriptions_evaluated"`
+	LegsEvaluated int                `json:"legs_evaluated"`
+	LegsMoved     int                `json:"legs_moved"`
+	LegsSkipped   map[string]int     `json:"legs_skipped_by_reason"`
+	Errors        int                `json:"errors"`
+	LastError     string             `json:"last_error,omitempty"`
+	GasCostUSD    map[string]float64 `json:"gas_cost_usd"`
+	Sweep         SweepStats         `json:"sweep"`
 }
 
-// SkipReasonCostUnavailable is recorded when the pass could not price a
-// rebalance. No decision is taken: fabricated cost data is worse than none.
 const SkipReasonCostUnavailable = "gas_cost_unavailable"
 
-// SkipReasonUnknownChain is recorded when a position names a chain this
-// backend does not serve. Routing it against the chain we happen to be
-// configured for is how money lands on the wrong network.
 const SkipReasonUnknownChain = "unknown_chain"
 
 func (e *Engine) now() time.Time {
@@ -92,7 +74,6 @@ func (e *Engine) now() time.Time {
 	return time.Now()
 }
 
-// Stats returns a copy of the last pass's counters.
 func (e *Engine) Stats() Stats {
 	s := e.stats
 	s.LegsSkipped = map[string]int{}
@@ -106,25 +87,15 @@ func (e *Engine) Stats() Stats {
 	return s
 }
 
-// Pass evaluates every eligible subscription once. It never returns early on a
-// single subscription's failure: one broken user must not stall the other 99.
 func (e *Engine) Pass(ctx context.Context) Stats {
 	start := e.now()
 	st := Stats{Passes: e.stats.Passes + 1, LastPassAt: start,
 		LegsSkipped: map[string]int{}, GasCostUSD: map[string]float64{}}
 
-	// One venue lookup per (asset, chain) per pass, shared across subscribers
-	// and with the sweeper.
 	venues := map[string][]client.Venue{}
 
-	// Resolve what already happened before deciding what to do next, or the
-	// drift evaluation reasons about positions we know are stale.
 	st.Sweep = e.sweepPending(ctx, venues)
 
-	// Price the move on live data, per chain and on demand: a chain whose gas
-	// or ETH price cannot be read skips its own legs, and never borrows the
-	// other chain's cost. No fallback — a rebalance decided on fabricated cost
-	// data is worse than no rebalance.
 	costs := &costCache{chains: map[int]chainCost{}, engine: e, st: &st}
 
 	subs, err := e.Store.ActiveSubscriptions(ctx)
@@ -137,9 +108,6 @@ func (e *Engine) Pass(ctx context.Context) Stats {
 		return st
 	}
 
-	// Per-user state for the pass: history is read once, and moves decided in
-	// this pass count against the daily cap immediately, so a user subscribed
-	// to several baskets cannot spend the budget twice.
 	pass := &passState{hist: map[string]store.History{}, spent: map[string]int{}, params: e.Policy, costs: costs}
 
 	for _, sub := range subs {
@@ -162,7 +130,6 @@ func (e *Engine) Pass(ctx context.Context) Stats {
 	return st
 }
 
-// passState carries per-user state across the subscriptions of one pass.
 type passState struct {
 	hist   map[string]store.History
 	spent  map[string]int
@@ -170,7 +137,6 @@ type passState struct {
 	costs  *costCache
 }
 
-// costCache prices one rebalance per chain, once per pass.
 type costCache struct {
 	chains map[int]chainCost
 	engine *Engine
@@ -182,7 +148,6 @@ type chainCost struct {
 	err error
 }
 
-// usd returns the cost of a move on one chain, or false if it cannot be had.
 func (c *costCache) usd(ctx context.Context, chainID int, label string) (float64, bool) {
 	got, ok := c.chains[chainID]
 	if !ok {
@@ -215,8 +180,6 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 		return nil
 	}
 
-	// Read history back far enough to answer both the hysteresis and the
-	// 24h rate-limit guard from one query.
 	hist, ok := pass.hist[sub.UserID]
 	if !ok {
 		lookback := 24 * time.Hour
@@ -251,8 +214,6 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 			st.LegsSkipped[SkipReasonCostUnavailable]++
 			continue
 		}
-		// A copy per leg, so the live price never mutates the configured params
-		// and one chain's cost never prices another chain's move.
 		params := pass.params
 		params.GasCostUSD = cost
 
@@ -323,10 +284,6 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 	return nil
 }
 
-// rank picks the best venue by reward-discounted APY and prices the position's
-// current venue the same way. Falling back to entry_apy when the current venue
-// has dropped out of market-data is the conservative choice: a stale, usually
-// higher number makes the keeper less eager to move, not more.
 func (e *Engine) rank(list []client.Venue, p store.Position, discount float64) (best client.Venue, currentAPY float64, found bool) {
 	currentAPY = policy.EffectiveAPY(p.EntryAPY, 0, 0, discount)
 	for _, v := range list {
@@ -336,7 +293,7 @@ func (e *Engine) rank(list []client.Venue, p store.Position, discount float64) (
 		}
 		if !found || eff > best.APY {
 			best, found = v, true
-			best.APY = eff // carry the effective rate, not the raw one
+			best.APY = eff
 		}
 	}
 	return best, currentAPY, found

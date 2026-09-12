@@ -13,18 +13,10 @@ pub enum PrivyError {
     Status { status: u16, body: String },
 }
 
-/// Client for Privy's wallet RPC API.
-///
-/// Calls are made against a *user's* embedded wallet via delegated actions: the
-/// user granted this app permission to act, and Privy's policy engine bounds
-/// what we may call. Funds never move into a wallet we control.
-#[derive(Clone)]
 pub struct Privy {
     http: reqwest::Client,
     app_id: String,
     basic_auth: String,
-    /// Absent when no authorization key is configured; requests then go out
-    /// unsigned and policy-protected wallets will reject them.
     authorizer: Option<Authorizer>,
 }
 
@@ -73,8 +65,6 @@ impl Privy {
         }
     }
 
-    /// POST to the Privy API, signing the request when an authorization key is
-    /// configured. `url` must be the full URL: it is part of the signed payload.
     async fn post_signed(
         &self,
         url: &str,
@@ -92,15 +82,10 @@ impl Privy {
         req.json(body).send().await
     }
 
-    /// `None` when no authorization key is configured.
     fn signature_header(&self, url: &str, body: &serde_json::Value) -> Option<String> {
         Some(self.authorizer.as_ref()?.sign(url, &self.app_id, body))
     }
 
-    /// Send one transaction from a user's delegated wallet.
-    ///
-    /// `reference_id` is our execution ID — Privy echoes it back, which is how
-    /// a retry after a timeout can be reconciled instead of double-spending.
     pub async fn send_transaction(
         &self,
         wallet_id: &str,
@@ -115,7 +100,7 @@ impl Privy {
             params: TxParams {
                 transaction: Tx {
                     to: format!("{:#x}", call.to),
-                    data: format!("0x{}", hex_encode(&call.data)),
+                    data: format!("0x{}", alloy_primitives::hex::encode(&call.data)),
                     value: "0x0",
                     chain_id,
                 },
@@ -123,7 +108,6 @@ impl Privy {
             reference_id: Some(reference_id),
         };
 
-        // Serialize once: the bytes we sign must describe the body we send.
         let body = serde_json::to_value(&body).expect("TxRequest is always serializable");
         let url = format!("{PRIVY_API}/v1/wallets/{wallet_id}/rpc");
         let resp = self.post_signed(&url, &body).await?;
@@ -139,7 +123,6 @@ impl Privy {
         Ok(resp.json::<TxResponse>().await?.data)
     }
 
-    /// Liveness check that does not sign anything.
     pub async fn ping(&self) -> bool {
         self.http
             .get(format!("{PRIVY_API}/v1/apps/{}", self.app_id))
@@ -152,20 +135,10 @@ impl Privy {
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
-    }
-    s
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::Authorizer;
 
-    /// Throwaway key, generated for tests only. Not a real credential.
     const TEST_KEY: &str = crate::auth::TEST_KEY;
 
     fn body() -> serde_json::Value {

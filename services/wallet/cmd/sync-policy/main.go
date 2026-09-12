@@ -1,21 +1,3 @@
-// Command sync-policy generates a Privy wallet policy from the executor's
-// allowlists and creates or updates it on Privy.
-//
-// Why it exists: today the venue allowlist is enforced only by the executor's
-// own code (executor/venues.json, executor/swaps.json). A compromised or
-// misconfigured executor would face no second limit. A Privy policy moves the
-// same constraint into Privy's enclave, so the delegated signer can only call
-// contracts and methods the policy permits regardless of what our code asks for.
-//
-// The tool is a dry run by default. Pass -apply to actually write; that creates
-// durable state on the Privy account and should never happen by accident.
-//
-//	go run ./services/wallet/cmd/sync-policy                      # print JSON
-//	go run ./services/wallet/cmd/sync-policy -apply               # create
-//	go run ./services/wallet/cmd/sync-policy -apply -policy-id X  # update in place
-//
-// Credentials come from the repo-root .env (PRIVY_APP_ID, PRIVY_APP_SECRET,
-// PRIVY_AUTHORIZATION_PRIVATE_KEY, PRIVY_KEY_QUORUM_ID) and are never printed.
 package main
 
 import (
@@ -64,15 +46,10 @@ func run() error {
 
 	write := *apply && !*dryRun
 
-	// Fall back to PRIVY_POLICY_ID so a re-sync after regenerating the allowlist
-	// is `-apply` alone. Without it the tool would create a second policy rather
-	// than update the one that is attached, and the attached one would go stale.
 	if *policyID == "" {
 		loadDotenv(*envPath)
 		*policyID = os.Getenv("PRIVY_POLICY_ID")
 	}
-	// The owner is only sent on create. Reading it for a dry run would fail on a
-	// machine without credentials, which would make the dry run useless.
 	ownerID := ""
 	if write && *policyID == "" {
 		loadDotenv(*envPath)
@@ -112,16 +89,12 @@ func run() error {
 		id = created
 		fmt.Fprintf(os.Stderr, "\ncreated policy %s\n", id)
 	} else {
-		// PATCH replaces the rule list wholesale, which is what keeps Privy in
-		// sync after venues.json is regenerated. owner_id is immutable and is
-		// left out of the body.
 		if err := c.updatePolicy(id, policy); err != nil {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "\nupdated policy %s\n", id)
 	}
 
-	// Read it back rather than trusting the write response.
 	got, err := c.getPolicy(id)
 	if err != nil {
 		return fmt.Errorf("readback: %w", err)
@@ -178,8 +151,6 @@ func readJSON(path string, into any) error {
 	return nil
 }
 
-// loadDotenv fills in vars that are not already set. Best effort: a missing file
-// is fine when the environment already carries the credentials.
 func loadDotenv(path string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -212,8 +183,6 @@ func mustEnv(key string) (string, error) {
 	return v, nil
 }
 
-// ------------------------------------------------------------- Privy client
-
 type client struct {
 	appID  string
 	secret string
@@ -241,7 +210,6 @@ func newClient() (*client, error) {
 	return &client{appID: appID, secret: secret, key: key, http: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
-// parseAuthKey reads a `wallet-auth:<base64 PKCS#8 P-256 key>` credential.
 func parseAuthKey(raw string) (*ecdsa.PrivateKey, error) {
 	b64 := strings.TrimPrefix(strings.TrimSpace(raw), "wallet-auth:")
 	der, err := base64.StdEncoding.DecodeString(b64)
@@ -324,9 +292,6 @@ func (c *client) do(method, url string, body, into any) error {
 	return json.Unmarshal(raw, into)
 }
 
-// sign produces the privy-authorization-signature header: ECDSA P-256 over the
-// RFC 8785 canonicalization of the request description. Cross-checked against
-// executor/src/auth.rs, which is verified against @privy-io/node.
 func (c *client) sign(method, url string, body []byte) (string, error) {
 	payload, err := canonical(map[string]any{
 		"version": 1,
@@ -346,9 +311,6 @@ func (c *client) sign(method, url string, body []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(der), nil
 }
 
-// canonical renders v as RFC 8785 JSON: object keys sorted, no whitespace, no
-// HTML escaping. Round-tripping through `any` is what sorts the nested objects;
-// encoding/json only sorts maps, and UseNumber keeps numeric literals verbatim.
 func canonical(v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {

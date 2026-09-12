@@ -48,13 +48,9 @@ export default function BasketPage() {
   const [amount, setAmount] = useState("1000");
   const [busy, setBusy] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
-  // Outcomes are announced, not stacked under the panel. `detail` is only set
-  // when the user opens the per-leg breakdown from a partial result.
   const { notify, detail, clear } = useSettleToast();
 
   const chain = useChain();
-  // Anyone can look at a basket. The authed route is only used once there is a
-  // session, because it is the one that knows whether you are subscribed.
   const anon = useAsync<BasketSummary | null>(
     `public-basket:${id}:${authenticated}`,
     () => (authenticated ? Promise.resolve(null) : publicBasket(id)),
@@ -66,7 +62,6 @@ export default function BasketPage() {
   const parsed = Number(amount);
   const amountValid = Number.isFinite(parsed) && parsed > 0;
 
-  // Planning on every keystroke would hammer the router; settle first.
   const [debounced, setDebounced] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(amountValid ? parsed : 0), 350);
@@ -82,21 +77,16 @@ export default function BasketPage() {
     debounced > 0 ? `/v1/baskets/${id}/plan?amount_usd=${debounced}` : null,
   );
 
-  // What this user actually holds in this basket. The only money figure the
-  // API gives for a basket — there is no protocol-wide TVL field.
   const holdings = useMemo(
     () => (portfolio.data?.positions ?? []).filter((p) => p.basket_id === id),
     [portfolio.data, id],
   );
   const held = holdings.reduce((s, p) => s + p.amount_usd, 0);
 
-  /** Real positions when there are any, the routing plan otherwise. */
   const legs = useMemo((): FlowLeg[] => {
     if (holdings.length > 0) {
       return holdings.map((h) => ({
         asset: h.asset,
-        // onchain_usd null means the holding could not be valued; the stored
-        // amount is what we last placed, so show that and never invent one.
         amountUsd: h.onchain_usd ?? h.amount_usd,
         venue:
           h.venue_id === IDLE_VENUE_ID
@@ -115,15 +105,12 @@ export default function BasketPage() {
     }));
   }, [holdings, plan.data]);
 
-  // Live blended rate: what the money is earning if it is placed, what it
-  // would earn if it is not.
   const apy =
     holdings.length > 0 && held > 0
       ? holdings.reduce((s, h) => s + (h.current_apy * h.amount_usd) / held, 0)
       : (plan.data?.blended_apy ?? null);
   const yearly = amountValid && apy !== null ? (parsed * apy) / 100 : null;
 
-  // One button, one next step. Onboarding has no page of its own.
   const step = !ready
     ? "loading"
     : !authenticated
@@ -150,7 +137,6 @@ export default function BasketPage() {
       });
       authedBasket.reload();
     } catch (e) {
-      // 412 carries the precondition that is missing; shown verbatim.
       toastError(e);
     } finally {
       setSubBusy(false);
@@ -165,12 +151,10 @@ export default function BasketPage() {
         method: "POST",
         body: JSON.stringify(all ? { all: true } : { amount_usd: parsed }),
       });
-      // 207 is a result, not an error: it warns and keeps its breakdown.
       const clean = notify(res.status, res.data, {
         key: id,
         verb: mode === "deposit" ? "Deposited" : "Withdrew",
       });
-      // Nothing left to read once it went through cleanly, so the form empties.
       if (clean) setAmount("");
     } catch (e) {
       toastError(e);
@@ -220,8 +204,6 @@ export default function BasketPage() {
                 {subBusy ? "Working…" : b.subscribed ? "Exit basket" : "Subscribe"}
               </Button>
             )}
-            {/* On a narrow screen the panel is below the fold, so the primary
-                action is a link to it rather than a second copy of it. */}
             <a href="#fund">
               <Button onClick={() => setMode("deposit")}>Deposit</Button>
             </a>
@@ -259,9 +241,6 @@ export default function BasketPage() {
               <Stat
                 label="Your position"
                 value={authenticated ? fmtUsd(held) : "—"}
-                // The API exposes this caller's holdings only; there is no
-                // basket-wide TVL to report, and inventing one is worse than
-                // labelling what we actually have.
                 note="this basket, your wallet"
               />
               <Stat
@@ -302,9 +281,6 @@ export default function BasketPage() {
               <Divider />
               <div className="p-5">
                 <Label>Contracts</Label>
-                {/* Only addresses we actually hold: the deposit asset, and any
-                    basket token the portfolio read resolved on chain. Nothing
-                    is derived from a ticker. */}
                 <ul className="mt-3 space-y-2 text-sm">
                   <AddressRow symbol={QUOTE_ASSET} address={chain.usdc} />
                   {weights.map((w) => {
@@ -382,8 +358,6 @@ export default function BasketPage() {
                     placeholder="0.00"
                     className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
                   />
-                  {/* Always USDC, never a picker: the basket's tokens are what
-                      it is converted into, which is a different control. */}
                   <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">
                     <TokenIcon symbol={QUOTE_ASSET} size={20} />
                     {QUOTE_ASSET}

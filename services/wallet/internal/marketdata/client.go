@@ -1,5 +1,3 @@
-// Package marketdata is a read-only client for the market-data service,
-// which serves normalized yield venues indexed from The Graph.
 package marketdata
 
 import (
@@ -15,19 +13,16 @@ import (
 
 var ErrNoVenue = errors.New("marketdata: no venue for asset")
 
-// Venue mirrors the market-data service's normalized venue schema.
 type Venue struct {
-	ID        string  `json:"id"`
-	Chain     string  `json:"chain"`
-	Project   string  `json:"project"`
-	Symbol    string  `json:"symbol"`
-	Asset     string  `json:"asset"`
-	TVLUsd    float64 `json:"tvl_usd"`
-	APY       float64 `json:"apy"`
-	APYBase   float64 `json:"apy_base"`
-	APYReward float64 `json:"apy_reward"`
-	// Yield the asset earns with no protocol interaction — holding wstETH is
-	// already a position. Undiscounted wherever it is ranked.
+	ID           string    `json:"id"`
+	Chain        string    `json:"chain"`
+	Project      string    `json:"project"`
+	Symbol       string    `json:"symbol"`
+	Asset        string    `json:"asset"`
+	TVLUsd       float64   `json:"tvl_usd"`
+	APY          float64   `json:"apy"`
+	APYBase      float64   `json:"apy_base"`
+	APYReward    float64   `json:"apy_reward"`
 	APYIntrinsic float64   `json:"apy_intrinsic"`
 	Stablecoin   bool      `json:"stablecoin"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -45,12 +40,6 @@ func New(baseURL string) *Client {
 	}
 }
 
-// Best returns the highest-APY venue for an asset, subject to a TVL floor.
-//
-// This is NOT the routing decision — see api.bestRoutable. The best indexed
-// venue may be one the executor cannot transact, so routing filters this set
-// against the executor's allowlist. Kept because it is the cheapest read for
-// "what is the best rate that exists", which is a display question.
 func (c *Client) Best(ctx context.Context, asset, chain string, minTVL float64) (Venue, error) {
 	q := url.Values{"asset": {asset}, "chain": {chain}}
 	if minTVL > 0 {
@@ -63,7 +52,6 @@ func (c *Client) Best(ctx context.Context, asset, chain string, minTVL float64) 
 	return env.Data, err
 }
 
-// Venues lists venues for an asset, best APY first.
 func (c *Client) Venues(ctx context.Context, asset, chain string, minTVL float64, limit int) ([]Venue, error) {
 	q := url.Values{"chain": {chain}}
 	if asset != "" {
@@ -84,8 +72,6 @@ func (c *Client) Venues(ctx context.Context, asset, chain string, minTVL float64
 	return env.Data.Venues, err
 }
 
-// get unwraps the market-data service's {"data": …} envelope — callers pass a
-// struct with a matching `data` field.
 func (c *Client) get(ctx context.Context, path string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {

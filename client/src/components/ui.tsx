@@ -13,11 +13,6 @@ import { TokenIcon } from "@/components/TokenIcon";
 import { cn } from "@/lib/utils";
 import type { LegResult, LegStatus, SettleResult, Step } from "@/lib/types";
 
-/**
- * Open state plus dismissal for every popover in the app: the settings menu,
- * the wallet menu and Picker all use this one implementation. Attach `ref` to
- * the wrapping element — a click outside it, or Escape, closes.
- */
 export function useDismissable() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +53,6 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
-/** Modest radius everywhere. The only pills are the nav Connect button and the token picker. */
 export function Button({
   children,
   variant = "primary",
@@ -87,7 +81,6 @@ export function Button({
   );
 }
 
-/** One rounded surface. Rows inside are separated by hairlines, never boxes. */
 export function Panel({
   children,
   className,
@@ -113,10 +106,6 @@ export function Label({ children }: { children: React.ReactNode }) {
   return <span className="text-sm text-muted-foreground">{children}</span>;
 }
 
-/**
- * Replaces the native <select>: browsers paint their own chevron and a light
- * popup that has nothing to do with this theme. Renders as a dark rounded pill.
- */
 export function Picker<T extends string>({
   value,
   onChange,
@@ -181,12 +170,6 @@ export function Picker<T extends string>({
   );
 }
 
-/**
- * Hover/focus tooltip. CSS only — no state, no positioning library, and it
- * works on a control that is aria-disabled because the group is the wrapper,
- * not the control. `title` carries the same text for touch and for anything
- * that never sees :hover.
- */
 export function Tooltip({
   label,
   children,
@@ -209,21 +192,15 @@ export function Tooltip({
   );
 }
 
-export type MultiOption<T extends string> = {
+type MultiOption<T extends string> = {
   value: T;
   label: string;
   hint?: string;
   icon?: React.ReactNode;
-  /** Not selectable. `reason` is what the tooltip says about why. */
   disabled?: boolean;
   reason?: string;
 };
 
-/**
- * Many-of-N in one control, for when a row of chips would wrap into a wall.
- * Same popover mechanics as Picker — one useDismissable, one absolute list —
- * so there is only ever one popover implementation in this app.
- */
 export function MultiPicker<T extends string>({
   values,
   onToggle,
@@ -321,8 +298,6 @@ export function MultiPicker<T extends string>({
   );
 }
 
-// --- execution rendering: 207, pending and null prices are first-class ---
-
 const LEG_TONE: Record<LegStatus, string> = {
   submitted: "border-positive/30 bg-positive/10 text-positive",
   pending: "border-warning/30 bg-warning/10 text-warning",
@@ -372,12 +347,6 @@ function Steps({ steps }: { steps: Step[] }) {
   );
 }
 
-/**
- * Renders a deposit or withdraw response. HTTP 207 is the normal partial case:
- * show which legs moved and which did not, never one blanket failure. `pending`
- * means the receipt poll timed out — the transaction may still land, so it is
- * amber and never red, and retrying could submit the same money twice.
- */
 export function SettleReport({
   result,
   status,

@@ -17,22 +17,14 @@ import (
 
 const DefaultGatewayURL = "https://gateway.thegraph.com/api/subgraphs/id"
 
-// ProtocolAdapter turns one protocol's subgraph schema into our Venue model.
-// Adding a protocol is one new file implementing this interface plus one line
-// in the registry — no changes anywhere else.
 type ProtocolAdapter interface {
-	Protocol() string                                          // "aave-v3"
-	SubgraphID() string                                        // deployment id on the decentralized network
-	Query() string                                             // GraphQL document
-	Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) // schema-specific -> canonical, USD via the shared Pricer
+	Protocol() string
+	SubgraphID() string
+	Query() string
+	Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error)
 }
 
-// GraphSource queries every registered adapter concurrently and merges the
-// results. One protocol failing never fails the cycle.
 type GraphSource struct {
-	// Chain every adapter in this source belongs to. One source serves exactly
-	// one chain, so a venue can never be tagged with a chain it did not come
-	// from.
 	Chain    Chain
 	Gateway  string
 	APIKey   string
@@ -45,15 +37,11 @@ type GraphSource struct {
 	status map[string]Status
 }
 
-// NewGraph builds a source over the given adapters. It fails loudly when the
-// API key is missing rather than silently degrading.
 func NewGraph(chain Chain, gateway, apiKey string, f Filter, feed PriceFeed, adapters ...ProtocolAdapter) (*GraphSource, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("GRAPH_API_KEY is required: subgraph queries cannot be authenticated without it")
 	}
 	if feed == nil {
-		// Without prices TVL would have to be guessed, and a wrong TVL misroutes
-		// money exactly as badly as a wrong APY. Fail loudly instead.
 		return nil, errors.New("price feed is required: venue TVL cannot be valued without it")
 	}
 	if len(adapters) == 0 {
@@ -76,7 +64,6 @@ func NewGraph(chain Chain, gateway, apiKey string, f Filter, feed PriceFeed, ada
 
 func (g *GraphSource) Name() string { return "thegraph:" + g.Chain.Label }
 
-// Fetch fans out across adapters, applies the product filter and merges.
 func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 	var (
 		wg  sync.WaitGroup
@@ -121,9 +108,6 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 	}
 	wg.Wait()
 
-	// Stacking has to happen after the fan-out, not inside an adapter: the
-	// intrinsic rate comes from one adapter and applies to the venues of all
-	// the others. A wstETH Aave reserve is a 3.1% position, not a 0.1% one.
 	out = StackIntrinsic(out)
 
 	if len(out) == 0 && !g.anyOK() {
@@ -132,7 +116,6 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 	return out, nil
 }
 
-// Status returns the per-protocol outcome of the most recent fetch.
 func (g *GraphSource) Status() []Status {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -146,8 +129,6 @@ func (g *GraphSource) Status() []Status {
 			}
 		}
 		if st.SubgraphID == "" {
-			// Never silent: an unconfigured chain must be visible in /sources
-			// rather than looking like a chain that simply has no venues.
 			st.Error = "no subgraph id configured for " + SubgraphEnvKey(protocolPrefix(a.Protocol()), g.Chain)
 		}
 		out = append(out, st)
@@ -155,7 +136,6 @@ func (g *GraphSource) Status() []Status {
 	return out
 }
 
-// setStatus keeps the previous last-success timestamp across a failed attempt.
 func (g *GraphSource) setStatus(st Status, ok bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -178,17 +158,6 @@ func (g *GraphSource) anyOK() bool {
 	return false
 }
 
-// url resolves a configured subgraph id. A full URL is used verbatim: Studio
-// deployments carry an account path and a version, while the decentralized
-// gateway takes a bare deployment id appended to its base. One source can
-// therefore mix the two, which is exactly what serving mainnet (public, on the
-// gateway) and Sepolia (ours, on Studio) at the same time requires.
-func (g *GraphSource) url(subgraphID string) string {
-	return SubgraphURL(g.Gateway, subgraphID)
-}
-
-// SubgraphURL applies that rule for callers outside a GraphSource (the venue
-// generator), so the two can never disagree about where a deployment lives.
 func SubgraphURL(gateway, subgraphID string) string {
 	if strings.HasPrefix(subgraphID, "http") {
 		return subgraphID
@@ -211,7 +180,7 @@ func (g *GraphSource) query(ctx context.Context, a ProtocolAdapter, p *Pricer) (
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.url(a.SubgraphID()), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, SubgraphURL(g.Gateway, a.SubgraphID()), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +206,8 @@ func (g *GraphSource) query(ctx context.Context, a ProtocolAdapter, p *Pricer) (
 	return a.Map(p, gr.Data)
 }
 
-// nowUTC is a variable so mapper tests can pin timestamps.
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
-// protocolPrefix maps a protocol name to its env-var prefix, so an error can
-// name the exact variable an operator has to set.
 func protocolPrefix(protocol string) string {
 	switch protocol {
 	case "aave-v3":

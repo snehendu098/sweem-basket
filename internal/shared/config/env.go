@@ -1,4 +1,3 @@
-// Package config holds tiny env-var helpers with defaults.
 package config
 
 import (
@@ -16,7 +15,6 @@ func GetEnv(key, def string) string {
 	return def
 }
 
-// GetEnvList splits a comma-separated env var, trimming spaces.
 func GetEnvList(key string, def []string) []string {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -60,8 +58,6 @@ func parse[T any](key string, def T, fn func(string) (T, error)) T {
 	return v
 }
 
-// LoadDotEnv reads simple KEY=VALUE lines from path into the process env.
-// Real environment variables always win; a missing file is not an error.
 func LoadDotEnv(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {

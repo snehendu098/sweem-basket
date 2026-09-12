@@ -60,7 +60,6 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-/* The carousel scrolls horizontally; a native bar under it just adds noise. */
 .no-scrollbar {
   scrollbar-width: none;
 }
@@ -69,7 +68,6 @@ body {
   display: none;
 }
 
-/* Figures line up without switching typeface: Poppins everywhere, tabular digits. */
 .tnum,
 .font-mono {
   font-variant-numeric: tabular-nums;
@@ -77,20 +75,12 @@ body {
 
 :root {
   color-scheme: dark;
-  /* Soft dark ground. Panels lift only slightly off it; borders are hairlines. */
   --background: #101010;
   --foreground: oklch(0.97 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.97 0 0);
   --popover: oklch(0.225 0 0);
   --popover-foreground: oklch(0.97 0 0);
-  /* sweem lime, sampled from the logo. The one saturated colour in the app:
-     primary action and the Connect pill.
-
-     Its foreground is near-black on purpose. #c4f56a has a relative luminance
-     of 0.781 — 1.26:1 against white, which is unreadable, and 14.9:1 against
-     #101010. Anywhere lime becomes a surface, the text on it is dark. Lime as
-     text on the dark ground is the other way round and fine. */
   --primary: #c4f56a;
   --primary-foreground: #101010;
   --secondary: oklch(0.269 0 0);
@@ -100,8 +90,6 @@ body {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.63 0.15 25);
-  /* Cooled from 158 to 190: a leaf green sitting beside lime reads as a
-     washed-out primary, and an APY figure must not look like a button. */
   --positive: oklch(0.76 0.1 190);
   --warning: oklch(0.76 0.1 80);
   --border: oklch(1 0 0 / 6%);
@@ -123,9 +111,6 @@ body {
   --sidebar-ring: #c4f56a;
 }
 
-/* One theme only: the tokens live in :root and <html> carries `dark` so
-   shadcn's dark: variants resolve. */
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -138,10 +123,8 @@ body {
   }
 }
 
-/* React Flow ships a light default theme. Only the pieces it paints itself —
-   the edges, their arrowheads and the dotted background — need retinting; the
-   nodes are our own markup and already themed. There are no edge labels to
-   restyle: every figure lives inside the node it belongs to. */
+/* Variables, not rule overrides: the React Flow stylesheet is imported by the
+   component and so loads after this file. */
 .react-flow {
   --xy-edge-stroke-default: var(--muted-foreground);
   --xy-edge-stroke-width-default: 1.5;

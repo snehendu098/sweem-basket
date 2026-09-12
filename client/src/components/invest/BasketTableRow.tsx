@@ -12,7 +12,6 @@ export function BasketTableRow({
 }: {
   rank: number;
   basket: BasketSummary;
-  /** Null when it cannot be computed — rendered as a dash, never a zero. */
   apy: number | null;
 }) {
   const router = useRouter();
@@ -66,8 +65,6 @@ export function BasketTableRow({
         {fmtPctOrDash(apy)}
       </td>
       <td className="px-4 py-4 text-sm">
-        {/* Nothing at all when logged out: both flags are per-caller, and
-            "not joined" is a claim we cannot make without a caller. */}
         {status === null ? null : status === "not joined" ? (
           <span className="text-xs text-muted-foreground">{status}</span>
         ) : (

@@ -1,8 +1,3 @@
-// Package tokenapi is a read-only client for The Graph's Token API, which
-// serves indexed onchain ERC-20 balances.
-//
-// Onchain balances are the truth; the positions table is only our bookkeeping.
-// The portfolio endpoint compares the two.
 package tokenapi
 
 import (
@@ -16,22 +11,17 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is The Graph's hosted Token API.
 const DefaultBaseURL = "https://token-api.thegraph.com"
 
-// ErrNotConfigured is returned when no JWT was supplied. Callers treat this as
-// "skip the onchain view", never as a failure.
 var ErrNotConfigured = errors.New("tokenapi: TOKEN_API_JWT not set")
 
-// Balance is one ERC-20 holding. Field names follow the API's
-// GET /v1/evm/balances response items.
 type Balance struct {
 	Contract   string  `json:"contract"`
 	Symbol     string  `json:"symbol"`
 	Name       string  `json:"name"`
 	Decimals   int     `json:"decimals"`
-	Amount     string  `json:"amount"` // raw integer, as a string
-	Value      float64 `json:"value"`  // amount scaled by decimals
+	Amount     string  `json:"amount"`
+	Value      float64 `json:"value"`
 	Network    string  `json:"network"`
 	LastUpdate string  `json:"last_update"`
 }
@@ -42,8 +32,6 @@ type Client struct {
 	http *http.Client
 }
 
-// New returns nil when jwt is empty. A nil *Client is safe to call: every
-// method returns ErrNotConfigured, so the demo runs without the key.
 func New(baseURL, jwt string) *Client {
 	if jwt == "" {
 		return nil
@@ -54,7 +42,6 @@ func New(baseURL, jwt string) *Client {
 	return &Client{base: baseURL, jwt: jwt, http: &http.Client{Timeout: 8 * time.Second}}
 }
 
-// Balances lists a wallet's ERC-20 balances on one network ("base", "mainnet", …).
 func (c *Client) Balances(ctx context.Context, address, network string, limit int) ([]Balance, error) {
 	if c == nil {
 		return nil, ErrNotConfigured

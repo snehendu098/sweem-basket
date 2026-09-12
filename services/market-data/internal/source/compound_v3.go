@@ -9,27 +9,15 @@ import (
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
-// CompoundV3 maps Comet's `Market` + `MarketAccounting` onto our Venue model.
-//
-// Rate convention: supplyApr / netSupplyApr are decimal FRACTIONS of an annual
-// simple rate (0.0201 == 2.01% APR), unlike Aave's ray and unlike Moonwell's
-// ready-made percentage. Compound III accrues every second, so the same
-// APRToAPY compounding used for Aave applies -- only the input scale differs.
-//
-// Other quirks absorbed here:
-//   - only the market's base token earns supply yield; collateral does not
-//   - netSupplyApr = supplyApr + rewardSupplyApr (COMP emissions)
-//   - TVL is already in USD on the accounting entity
 type CompoundV3 struct {
-	Chain      string
-	ID         string
-	MaxMarkets int
+	Chain string
+	ID    string
 }
 
-// NewCompoundV3 takes the subgraph id for one chain; see NewAaveV3 on why an
-// unset id is never defaulted.
+const cometMaxMarkets = 50
+
 func NewCompoundV3(chain, subgraphID string) *CompoundV3 {
-	return &CompoundV3{Chain: chain, ID: subgraphID, MaxMarkets: 50}
+	return &CompoundV3{Chain: chain, ID: subgraphID}
 }
 
 func (c *CompoundV3) Protocol() string   { return "compound-v3" }
@@ -42,7 +30,7 @@ func (c *CompoundV3) Query() string {
     configuration { symbol baseToken { token { address symbol decimals } } }
     accounting { totalBaseSupplyUsd supplyApr rewardSupplyApr netSupplyApr }
   }
-}`, c.MaxMarkets)
+}`, cometMaxMarkets)
 }
 
 type cometMarkets struct {
@@ -83,15 +71,11 @@ func (c *CompoundV3) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 		apy := APRToAPY(net)
 		apyBase := APRToAPY(base)
 		tvl := parseDecimal(mk.Accounting.TotalBaseSupplyUsd)
-		// Zero APY is left to Filter: on a testnet a market pays 0% because
-		// nobody borrows, which is idle, not broken.
 		if apy < 0 || tvl <= 0 {
 			continue
 		}
 		tok := mk.Configuration.BaseToken.Token
 		asset := ResolveAsset([]string{tok.Address}, tok.Symbol)
-		// Lowercased for the same reason as the Aave reserve id: it is the key
-		// the allowlist and the direct-RPC source match on.
 		poolID := strings.ToLower(mk.ID)
 		out = append(out, venue.Venue{
 			ID:         venue.MakeID(c.Chain, c.Protocol(), poolID),
@@ -111,7 +95,6 @@ func (c *CompoundV3) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 	return out, nil
 }
 
-// parseDecimal reads a GraphQL BigDecimal, which arrives as a JSON string.
 func parseDecimal(s string) float64 {
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {

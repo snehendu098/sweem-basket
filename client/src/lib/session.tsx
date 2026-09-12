@@ -29,24 +29,19 @@ export type Session = {
   authenticated: boolean;
   login: () => void;
   logout: () => Promise<void>;
-  /** The Privy embedded wallet. Undefined until Privy creates one. */
   wallet: WalletWithMetadata | undefined;
   createWallet: () => Promise<void>;
   creatingWallet: boolean;
-  /** Our backend's record of this user. Null until POST /v1/me succeeds. */
   me: Me | null;
   meError: string | null;
   syncing: boolean;
   refreshMe: () => Promise<void>;
-  /** Opens Privy's export modal. The key is shown in Privy's iframe, never to us. */
   exportWallet: () => Promise<void>;
   delegate: () => Promise<void>;
   revoke: () => Promise<void>;
   delegating: boolean;
   delegationError: string | null;
-  /** Configuration problem, not a user problem — surfaced instead of hidden. */
   signerConfigured: boolean;
-  /** Authenticated call to the wallet service. Token is fetched fresh each time. */
   api: <T>(path: string, init?: RequestInit) => Promise<Res<T>>;
 };
 
@@ -88,12 +83,8 @@ function SessionInner({ children }: { children: React.ReactNode }) {
 
   const wallet = embeddedWallet(user?.linkedAccounts);
 
-  // The module-level getAccessToken is stable, so `api` is too — data-loading
-  // effects downstream do not re-run on every render.
   const api = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<Res<T>> => {
-      // Privy refreshes the ~1h access token internally; ask for it per call
-      // rather than caching one that will silently expire.
       const token = await getAccessToken();
       if (!token) throw new ApiError(401, "not logged in");
       return walletFetch<T>(path, token, init);
@@ -110,9 +101,6 @@ function SessionInner({ children }: { children: React.ReactNode }) {
           method: "POST",
           body: JSON.stringify({
             wallet_address: w.address,
-            // Privy only exposes the server wallet ID once the wallet has a
-            // signer, so this is empty before delegation. The backend needs it
-            // to execute, which is why we re-POST after delegating.
             privy_wallet_id: w.id ?? "",
             delegated: w.delegated,
           }),
@@ -127,7 +115,6 @@ function SessionInner({ children }: { children: React.ReactNode }) {
     [api],
   );
 
-  // Re-bind whenever the wallet's identity or delegation state changes.
   const lastSynced = useRef<string | null>(null);
   useEffect(() => {
     if (!ready || !authenticated || !wallet) return;
@@ -178,16 +165,12 @@ function SessionInner({ children }: { children: React.ReactNode }) {
     setDelegating(true);
     setDelegationError(null);
     try {
-      // Privy React SDK v3: useSigners().addSigners.
-      // docs.privy.io/wallets/using-wallets/signers/add-signers
       await addSigners({
         address: wallet.address,
         signers: [
           { signerId: SIGNER_ID, policyIds: POLICY_ID ? [POLICY_ID] : [] },
         ],
       });
-      // The `user` object updates and the sync effect re-POSTs /v1/me with
-      // delegated: true and the now-present privy_wallet_id.
       lastSynced.current = null;
     } catch (e) {
       setDelegationError(msg(e));
@@ -201,7 +184,6 @@ function SessionInner({ children }: { children: React.ReactNode }) {
     setDelegating(true);
     setDelegationError(null);
     try {
-      // Removes every signer on the wallet: only the user can transact after this.
       await removeSigners({ address: wallet.address });
       lastSynced.current = null;
     } catch (e) {
@@ -254,17 +236,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         loginMethods: ["email", "wallet"],
         appearance: {
           theme: "dark",
-          // The brand lime, so Privy's modal matches the app it opens over.
           accentColor: "#c4f56a",
           landingHeader: "Sign in to sweem",
           loginMessage: "Your funds stay in your own wallet.",
-          // appearance.walletList takes WalletListEntry values — verified in
-          // node_modules/@privy-io/react-auth/dist/dts/types-B70mtFgn.d.ts
-          // (PrivyClientConfig.appearance.walletList, WalletListEntry union).
-          // Brave has no entry of its own: it injects an EVM provider, so
-          // detected_ethereum_wallets is what surfaces it. Phantom is listed
-          // under its own key and connects over its EVM provider because
-          // walletChainType is ethereum-only, which is what Base Sepolia needs.
           walletList: [
             "detected_ethereum_wallets",
             "metamask",
@@ -273,8 +247,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           ],
           walletChainType: "ethereum-only",
         },
-        // Every user needs an embedded wallet: it is the account the protocol
-        // routes for. Without one there is nothing to delegate.
         embeddedWallets: { ethereum: { createOnLogin: "all-users" } },
       }}
     >
@@ -283,7 +255,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Loading state for one wallet-service GET. Refetches when `path` changes. */
 export function useApi<T>(path: string | null) {
   const { api, authenticated, ready } = useSession();
   const [nonce, setNonce] = useState(0);
@@ -293,9 +264,6 @@ export function useApi<T>(path: string | null) {
     error: string | null;
   }>({ key: "", data: null, error: null });
 
-  // The request key doubles as the loading signal: while it differs from the
-  // key the last response settled under, a request is in flight. No setState
-  // during the effect body, so no cascading render.
   const key = path === null || !ready || !authenticated ? "" : `${nonce}:${path}`;
 
   useEffect(() => {
@@ -318,7 +286,6 @@ export function useApi<T>(path: string | null) {
   };
 }
 
-/** Same, for the unauthenticated market-data service. `key` identifies the request. */
 export function useAsync<T>(key: string, fn: () => Promise<T>) {
   const [state, setState] = useState<{
     key: string;
@@ -334,7 +301,6 @@ export function useAsync<T>(key: string, fn: () => Promise<T>) {
     return () => {
       live = false;
     };
-    // fn is recreated every render by design; the key is what identifies it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 

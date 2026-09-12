@@ -1,12 +1,5 @@
 package main
 
-// Policy document generation.
-//
-// The shape of the allowlist that the executor enforces locally
-// (`executor/venues.json`, `executor/swaps.json`) is turned into a Privy policy
-// so the same constraint is enforced by Privy's enclave, outside our code. Every
-// address here is derived from those files; nothing is hand-written.
-
 import (
 	"encoding/json"
 	"fmt"
@@ -14,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-// ---------------------------------------------------------------- allowlists
 
 type venueFile struct {
 	Venues []venue `json:"venues"`
@@ -39,22 +30,13 @@ type swapPath struct {
 	TokenIn string `json:"token_in"`
 }
 
-// ------------------------------------------------------------- policy schema
-//
-// https://docs.privy.io/controls/policies/overview — policy -> rules ->
-// conditions. A policy denies by default: any RPC method without a matching
-// ALLOW rule is refused, and a DENY always beats an ALLOW.
-
 type Policy struct {
-	// ID is only ever populated by Privy on a read or a create response.
 	ID        string `json:"id,omitempty"`
 	Version   string `json:"version"`
 	Name      string `json:"name"`
 	ChainType string `json:"chain_type"`
 	Rules     []Rule `json:"rules"`
-	// OwnerID is the key quorum whose signature is needed to modify the policy.
-	// Omitted on PATCH, where the id is in the URL and the owner is already set.
-	OwnerID string `json:"owner_id,omitempty"`
+	OwnerID   string `json:"owner_id,omitempty"`
 }
 
 type Rule struct {
@@ -72,18 +54,9 @@ type Condition struct {
 	Value       any             `json:"value"`
 }
 
-// methods carrying the rules. The executor only uses eth_sendTransaction
-// (executor/src/privy.rs), but eth_signTransaction is the same authority minus
-// the broadcast, so it gets the identical rules rather than being left to the
-// default deny — and it is the one method that can be exercised against a real
-// wallet without spending anything, which is how enforcement gets verified.
 var methods = []string{"eth_sendTransaction", "eth_signTransaction"}
 
-// Privy caps a rule name at 50 characters, so the method is tagged rather than
-// spelled out. Rule names must still be unique enough to read in the dashboard.
 var methodTag = map[string]string{"eth_sendTransaction": "send", "eth_signTransaction": "sign"}
-
-// ------------------------------------------------------------------- the ABIs
 
 type abiArg struct {
 	Name       string   `json:"name"`
@@ -92,11 +65,9 @@ type abiArg struct {
 }
 
 type abiFn struct {
-	Name   string   `json:"name"`
-	Type   string   `json:"type"` // always "function"
-	Inputs []abiArg `json:"inputs"`
-	// Privy decodes calldata only; outputs never matter, but the field is part
-	// of a well-formed ABI entry so it is emitted as an empty list.
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Inputs          []abiArg `json:"inputs"`
 	Outputs         []abiArg `json:"outputs"`
 	StateMutability string   `json:"stateMutability"`
 }
@@ -114,20 +85,17 @@ func tuple(name string, components ...abiArg) abiArg {
 func abiOf(fns ...abiFn) json.RawMessage {
 	b, err := json.Marshal(fns)
 	if err != nil {
-		panic(err) // static data; a failure here is a programming error
+		panic(err)
 	}
 	return b
 }
 
-// venueKind pairs a kind in venues.json with the exact methods the executor
-// encodes for it (executor/src/venues.rs `deposit_call` / `withdraw_call`).
 type venueKind struct {
 	kind  string
 	label string
 	fns   []abiFn
 }
 
-// Order is fixed so the generated document is byte-stable across runs.
 var venueKinds = []venueKind{
 	{"erc4626", "ERC-4626 vault", []abiFn{
 		fn("deposit", arg("assets", "uint256"), arg("receiver", "address")),
@@ -146,9 +114,6 @@ var venueKinds = []venueKind{
 		fn("mint", arg("mintAmount", "uint256")),
 		fn("redeemUnderlying", arg("redeemAmount", "uint256")),
 	}},
-	// "hold" is deliberately absent: a hold venue has no contract to call, and
-	// deposit_call/withdraw_call refuse it. Its token is reachable only as a
-	// swap input or an approval target, both covered by other rules.
 	{"hold", "", nil},
 }
 
@@ -168,14 +133,6 @@ var swapFns = []abiFn{
 
 var approveFn = fn("approve", arg("spender", "address"), arg("amount", "uint256"))
 
-// --------------------------------------------------------------- the builder
-
-// Build turns the two allowlists into a policy document.
-//
-// Addresses are lowercased: Privy compares EVM addresses case-insensitively for
-// `ethereum_transaction.to` and for address arguments decoded from calldata
-// (https://docs.privy.io/controls/policies/condition-sets), so one form is
-// enough, and a single form keeps the output diffable.
 func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 	if len(v.Venues) == 0 {
 		return Policy{}, fmt.Errorf("no venues: refusing to build a policy that allows nothing")
@@ -183,8 +140,8 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 
 	targets := map[string]*set{}
 	chains := &set{}
-	assets := &set{}   // ERC-20s the executor may call `approve` on
-	spenders := &set{} // who those approvals may name
+	assets := &set{}
+	spenders := &set{}
 	routers := &set{}
 
 	known := map[string]bool{}
@@ -194,10 +151,6 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 
 	for _, x := range v.Venues {
 		if !known[x.Kind] {
-			// A new kind means the executor encodes calldata this generator does
-			// not describe. Failing is the only safe answer: silently skipping it
-			// would produce a policy that blocks a supported venue, and guessing
-			// would produce one that allows calldata nobody reviewed.
 			return Policy{}, fmt.Errorf("venue %s: unknown kind %q; teach sync-policy this kind before regenerating", x.ID, x.Kind)
 		}
 		chains.add(strconv.FormatInt(x.ChainID, 10))
@@ -256,9 +209,6 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 		)
 	}
 
-	// The highest-value rule in the document. An `approve` with an unconstrained
-	// spender is how funds usually leave a wallet, so the spender is pinned to
-	// the same allowlist the `to` rules use.
 	approveAbi := abiOf(approveFn)
 	add("ERC-20 approve to an allowlisted spender",
 		chainCond,
@@ -267,9 +217,6 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 		Condition{FieldSource: "ethereum_calldata", Field: "approve.spender", ABI: approveAbi, Operator: "in", Value: spenders.list()},
 	)
 
-	// Every call the executor builds carries value 0x0 (executor/src/privy.rs).
-	// A DENY beats any ALLOW, so this closes native-ETH movement across all the
-	// rules above without repeating a condition in each of them.
 	for _, m := range methods {
 		rules = append(rules, Rule{
 			Name:   "Deny any native value transfer (" + methodTag[m] + ")",
@@ -298,8 +245,6 @@ func fnNames(fns []abiFn) []string {
 	return out
 }
 
-// set is a sorted, deduplicated, lowercased string set. Sorting is what makes
-// re-running the tool against an unchanged allowlist a no-op diff.
 type set struct{ m map[string]struct{} }
 
 func (s *set) add(v string) {

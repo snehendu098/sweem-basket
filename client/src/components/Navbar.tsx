@@ -25,10 +25,6 @@ const NAV = [
   { label: "Portfolio", href: "/portfolio" },
 ] as const;
 
-/**
- * The header lays out its own children edge to edge, so the wordmark sits at
- * the left margin no matter how the page wrapper aligns the header itself.
- */
 export function Navbar() {
   const pathname = usePathname();
   const reduced = useReducedMotion();
@@ -42,10 +38,6 @@ export function Navbar() {
             href="/"
             className="mr-6 flex items-center gap-2 text-lg font-semibold tracking-tight"
           >
-            {/* Above the fold on every route, so it is not lazy-loaded.
-                A 64px source served as-is: at 26px there is nothing for the
-                optimizer to save, and unoptimized keeps the standalone runtime
-                from needing sharp to render the wordmark. */}
             <Image
               src="/sweem-mark.png"
               alt=""
@@ -109,11 +101,6 @@ export function Navbar() {
   );
 }
 
-/**
- * Which chain everything talks to. Testnet is amber with a dot and mainnet is
- * not: at a glance, from across a room, nobody has to wonder whether the money
- * on screen is real.
- */
 function NetworkToggle() {
   const { chainId, setChainId, chains } = useChain();
   return (
@@ -148,7 +135,7 @@ function NetworkToggle() {
                 )}
               />
             )}
-            {c.short}
+            {c.name}
           </button>
         );
       })}
@@ -156,7 +143,6 @@ function NetworkToggle() {
   );
 }
 
-/** The connected wallet: address, balances, export, disconnect. */
 function WalletMenu() {
   const { wallet, logout, exportWallet, authenticated } = useSession();
   const chain = useChain();
@@ -173,8 +159,6 @@ function WalletMenu() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
-      // Clipboard is blocked outside a secure context; the address is on
-      // screen in full in the title attribute either way.
     }
   }
 
@@ -248,15 +232,6 @@ function WalletMenu() {
   );
 }
 
-/**
- * USDC and ETH on the active chain.
- *
- * GET /v1/portfolio already carries onchain ERC-20 balances, so that is the
- * first source — but it is empty when TOKEN_API_JWT is unset, and it never
- * carries native ETH. Both gaps fall back to a direct RPC read. If that fails
- * too the figure is a dash and a reason: a fabricated zero looks like an empty
- * wallet, which is a different and much worse claim than "we do not know".
- */
 function Balances({ address, enabled }: { address: string; enabled: boolean }) {
   const chain = useChain();
   const portfolio = useApi<Portfolio>(enabled ? "/v1/portfolio" : null);
@@ -314,7 +289,6 @@ function BalanceRow({
   );
 }
 
-/** Delegation, wallet creation and logout live here so every control stays reachable. */
 function SettingsMenu() {
   const {
     ready,

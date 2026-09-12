@@ -5,16 +5,11 @@ import { displayAsset, fmtPctOrDash } from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
 import { ownership, type BasketSummary } from "@/lib/types";
 
-/**
- * One public basket in the featured row. The APY is passed in rather than
- * fetched here: resolving it per card would be one request per card.
- */
 export function BasketCard({
   basket,
   apy,
 }: {
   basket: BasketSummary;
-  /** Blended APY, or null when it cannot be computed. Null renders a dash. */
   apy: number | null;
 }) {
   const assets = (basket.weights ?? []).map((w) => w.asset);
@@ -43,7 +38,6 @@ export function BasketCard({
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{basket.name}</p>
-          {/* The assets are the handle: real, and the thing that differs. */}
           <p className="truncate text-xs text-muted-foreground">
             {assets.length > 0 ? assets.map(displayAsset).join(" · ") : "no assets"}
           </p>

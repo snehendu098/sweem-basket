@@ -10,29 +10,15 @@ import (
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
-// AaveV3 maps Aave's `Reserve` entity onto our Venue model.
-//
-// Schema quirks this mapper absorbs (aave/protocol-subgraphs v3.schema.graphql):
-//   - liquidityRate is a ray (1e27) *annual simple* rate -> RayRateToAPY
-//   - totalLiquidity is raw token units -> scale by `decimals`
-//   - price.priceInEth is misnamed on V3: it is the price in the oracle's base
-//     currency (USD) scaled by oracle.baseCurrencyUnit (1e8)
-//   - that oracle price is 0 for several live Base reserves (GHO, cbETH, wstETH,
-//     EURC, weETH). Those reserves used to be dropped; they are now valued from
-//     Chainlink instead. If Chainlink cannot price them either, they are still
-//     dropped — never valued at a peg or at a similar asset's price.
 type AaveV3 struct {
-	Chain      string
-	ID         string
-	MaxMarkets int
+	Chain string
+	ID    string
 }
 
-// NewAaveV3 takes the subgraph id for one chain. There is deliberately no
-// default: every known id is a specific network's deployment, and substituting
-// one when unconfigured serves venues from the wrong network instead of
-// failing. An empty id reports as unconfigured.
+const aaveMaxMarkets = 200
+
 func NewAaveV3(chain, subgraphID string) *AaveV3 {
-	return &AaveV3{Chain: chain, ID: subgraphID, MaxMarkets: 200}
+	return &AaveV3{Chain: chain, ID: subgraphID}
 }
 
 func (a *AaveV3) Protocol() string   { return "aave-v3" }
@@ -52,7 +38,7 @@ func (a *AaveV3) Query() string {
     isPaused
     price { priceInEth oracle { baseCurrencyUnit } }
   }
-}`, a.MaxMarkets)
+}`, aaveMaxMarkets)
 }
 
 type aaveReserves struct {
@@ -87,26 +73,17 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 		apy := RayRateToAPY(bigIntFromString(r.LiquidityRate))
 		supply := decimalFloat(r.TotalLiquidity, r.Decimals)
 		asset := ResolveAsset([]string{r.UnderlyingAsset}, r.Symbol)
-		// A frozen, paused or inactive reserve is not a routable venue, whatever
-		// its rate says. The query filters these out; this is the belt-and-braces.
-		// A zero rate is NOT filtered here: whether an idle-but-working market is
-		// usable is a per-chain product rule, and it lives in Filter.
 		if !r.IsActive || r.IsFrozen || r.IsPaused || apy < 0 {
 			continue
 		}
 		price := scaledFloat(r.Price.PriceInEth, r.Price.Oracle.BaseCurrencyUnit)
 		if price <= 0 {
-			// The venue's own oracle has no number for us; read the same market
-			// from Chainlink rather than dropping a real reserve.
 			var ok bool
 			if price, ok = p.USD(asset); !ok {
 				slog.Warn("aave-v3: reserve dropped, unpriceable", "reserve", r.ID, "asset", asset, "symbol", r.Symbol)
 				continue
 			}
 		}
-		// Lowercased, because the id is the routing key: the executor allowlist
-		// and the direct-RPC source both spell an address in lower case, and a
-		// subgraph that ever checksums one would make the venue unroutable.
 		poolID := strings.ToLower(r.ID)
 		out = append(out, venue.Venue{
 			ID:         venue.MakeID(a.Chain, a.Protocol(), poolID),
@@ -117,7 +94,7 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 			Asset:      asset,
 			TVLUsd:     supply * price,
 			APY:        apy,
-			APYBase:    apy, // Aave reserves pay no reward APR in the subgraph
+			APYBase:    apy,
 			Stablecoin: isStable(asset),
 			UpdatedAt:  now,
 		})
@@ -125,7 +102,6 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 	return out, nil
 }
 
-// scaledFloat divides a big integer string by a big integer unit string.
 func scaledFloat(value, unit string) float64 {
 	v, u := bigIntFromString(value), bigIntFromString(unit)
 	if v == nil || u == nil || u.Sign() == 0 {
@@ -135,7 +111,6 @@ func scaledFloat(value, unit string) float64 {
 	return f
 }
 
-// decimalFloat divides a raw token amount by 10^decimals.
 func decimalFloat(value string, decimals int) float64 {
 	v := bigIntFromString(value)
 	if v == nil || decimals < 0 {

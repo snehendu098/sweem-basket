@@ -3,10 +3,6 @@
 import { fmtPctOrDash } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 
-/**
- * Every figure here is one we actually hold. There is no protocol-wide total,
- * because we do not have one and will not invent one. No banner art either.
- */
 export function HeroSection({
   basketCount,
   venueCount,
@@ -14,7 +10,6 @@ export function HeroSection({
 }: {
   basketCount: number;
   venueCount: number;
-  /** Highest APY across indexed venues; null before market data arrives. */
   bestApy: number | null;
 }) {
   const chain = useChain();

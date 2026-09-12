@@ -54,12 +54,11 @@ func TestUnconfiguredAdapterIsListedAndNamesItsEnvVar(t *testing.T) {
 
 // A full URL is used verbatim (Studio), a bare id hangs off the gateway base.
 func TestSubgraphURLAcceptsBothStudioAndGateway(t *testing.T) {
-	g := &GraphSource{Gateway: DefaultGatewayURL}
-	if got := g.url("QmBareDeploymentID"); got != DefaultGatewayURL+"/QmBareDeploymentID" {
+	if got := SubgraphURL(DefaultGatewayURL, "QmBareDeploymentID"); got != DefaultGatewayURL+"/QmBareDeploymentID" {
 		t.Fatalf("bare id url = %q", got)
 	}
 	studio := "https://api.studio.thegraph.com/query/1/aave-v-3-base-sepolia/v0.0.1"
-	if got := g.url(studio); got != studio {
+	if got := SubgraphURL(DefaultGatewayURL, studio); got != studio {
 		t.Fatalf("studio url = %q, want it used verbatim", got)
 	}
 }

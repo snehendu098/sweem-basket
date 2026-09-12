@@ -27,26 +27,11 @@ const HOUR = 3600;
 
 export const PROTOCOL = "aave-v3";
 
-// Reserve configuration bitmap layout (Aave V3 ReserveConfiguration.sol).
 const ACTIVE_BIT: u8 = 56;
 const FROZEN_BIT: u8 = 57;
 const BORROWING_BIT: u8 = 58;
 const PAUSED_BIT: u8 = 60;
 
-/**
- * Seed every reserve from `Pool.getReservesList()` at the start block.
- *
- * This is what lets the mainnet deployment start near chain head. Historically
- * the aToken and variableDebtToken addresses arrived only on `ReserveInitialized`,
- * which fires once at market launch — block 2357134 on Base, ~49M blocks of
- * scanning ago. Reading the reserve list and the token addresses directly costs
- * a handful of eth_calls, once, and removes the dependency entirely.
- *
- * Rates are not seeded here: `liquidityRate` lives on the event. Every reserve
- * with any activity emits `ReserveDataUpdated` within minutes, so a Venue is
- * complete long before the subgraph reaches head. A reserve with no activity in
- * the whole window has no rate to route on anyway.
- */
 export function handlePoolInit(block: ethereum.Block): void {
   let poolAddress = dataSource.address();
   let registry = aaveRegistry(poolAddress);
@@ -74,9 +59,6 @@ export function handlePoolInit(block: ethereum.Block): void {
 }
 
 export function handleReserveInitialized(event: ReserveInitialized): void {
-  // The configurator's events do not carry the Pool, but the aToken knows it.
-  // Resolving it here rather than hardcoding is what lets one mapping serve
-  // both Base Sepolia and Base mainnet.
   let registry = AaveRegistry.load("1");
   if (registry == null) {
     let pool = AToken.bind(event.params.aToken).try_POOL();
@@ -104,15 +86,11 @@ export function handleReserveInitialized(event: ReserveInitialized): void {
 }
 
 export function handleReserveDataUpdated(event: ReserveDataUpdated): void {
-  // In a Pool handler event.address IS the Pool, which is the authoritative
-  // way to learn it on whichever network this is running against.
   let registry = aaveRegistry(event.address);
 
   let id = event.params.reserve.toHexString();
   let reserve = Reserve.load(id);
   if (reserve == null) {
-    // Should not happen — ReserveInitialized runs first — but a reserve added
-    // by a future configurator must not be silently dropped.
     reserve = newReserve(id, event.params.reserve, event.block);
     reserve.pool = changetype<Bytes>(event.address);
     reserve.price = syncOracleAsset(registry, event.params.reserve, event.block).id;
@@ -166,11 +144,6 @@ function newReserve(
   return reserve;
 }
 
-/**
- * Singleton holding this network's Pool and PoolAddressesProvider. Written the
- * first time an address is learned and read from cache afterwards, so the two
- * extra eth_calls happen once per subgraph rather than once per event.
- */
 function aaveRegistry(pool: Address): AaveRegistry {
   let registry = AaveRegistry.load("1");
   if (registry != null) {
@@ -189,14 +162,6 @@ function aaveRegistry(pool: Address): AaveRegistry {
   return registry;
 }
 
-/**
- * Re-read the parts of reserve state that are not carried on the event: the
- * aToken / debt-token supplies, the configuration flags and the oracle price,
- * then publish the normalized Venue row.
- *
- * Every call is a `try_` — a single misconfigured reserve must not halt
- * indexing for the rest of the market.
- */
 function refresh(
   registry: AaveRegistry | null,
   reserve: Reserve,
@@ -245,8 +210,6 @@ function refresh(
   syncOracleAsset(registry, Address.fromBytes(reserve.underlyingAsset), block);
   reserve.save();
 
-  // Aave addresses a supply position by its underlying asset, so the asset is
-  // also the pool key the executor allowlist uses.
   let asset = Address.fromBytes(reserve.underlyingAsset);
   upsertVenue(
     PROTOCOL,
@@ -263,18 +226,6 @@ function refresh(
   );
 }
 
-/**
- * Fill in the aToken / variableDebtToken addresses for a reserve that was never
- * seen being initialized — the normal case on a deployment that starts near
- * chain head. `getReserveAToken` / `getReserveVariableDebtToken` exist from Aave
- * 3.2 onwards (present on Base mainnet, absent on the older Base Sepolia Pool),
- * so both are `try_` and a revert simply leaves the addresses to arrive on
- * `ReserveInitialized` the way they always did.
- *
- * Without these two supplies the reserve reports zero TVL, which is a silent
- * mispricing rather than a visible failure — so it is worth re-checking on every
- * refresh until they are known, not just once.
- */
 function ensureTokens(registry: AaveRegistry | null, reserve: Reserve): void {
   if (reserve.aToken.length == 20 && reserve.variableDebtToken.length == 20) {
     return;
@@ -300,16 +251,10 @@ function ensureTokens(registry: AaveRegistry | null, reserve: Reserve): void {
   }
 }
 
-/** Bit `n` of the reserve configuration bitmap, via div/mod so no shift op is needed. */
 function bit(data: BigInt, n: u8): boolean {
   return data.div(TWO.pow(n)).mod(TWO).equals(ONE);
 }
 
-/**
- * Refresh the oracle singleton and this asset's quote. The oracle is read from
- * the addresses provider on every call rather than pinned, because Aave
- * governance can and does swap the oracle behind the provider.
- */
 function syncOracleAsset(
   registry: AaveRegistry | null,
   asset: Address,
@@ -358,7 +303,6 @@ function syncOracleAsset(
   return entry;
 }
 
-/** Hourly bucket, last write in the hour wins. Same shape as the other two protocols. */
 function writeSnapshot(reserve: Reserve, block: ethereum.Block): void {
   let hourIndex = block.timestamp.toI32() / HOUR;
   let id = reserve.id + "-" + hourIndex.toString();

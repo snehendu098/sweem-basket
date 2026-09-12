@@ -1,4 +1,3 @@
-// Package redisclient constructs the shared Redis client.
 package redisclient
 
 import (
@@ -6,7 +5,6 @@ import (
 	"github.com/snehendu098/sweem-basket/internal/shared/config"
 )
 
-// New builds a client from REDIS_URL (default redis://localhost:6379).
 func New() (*redis.Client, error) {
 	opt, err := redis.ParseURL(config.GetEnv("REDIS_URL", "redis://localhost:6379"))
 	if err != nil {

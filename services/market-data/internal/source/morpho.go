@@ -11,45 +11,23 @@ import (
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
-// Default bounds on the share-price sampling window. Overridable with
-// MORPHO_MIN_WINDOW / MORPHO_MAX_WINDOW (Go duration strings).
 const (
 	DefaultMorphoMinWindow = 6 * time.Hour
 	DefaultMorphoMaxWindow = 7 * 24 * time.Hour
 )
 
-// MorphoBlue maps MetaMorpho `Vault` entities (subgraph/morpho-blue-base) onto
-// our Venue model.
-//
-// Rate convention: Morpho publishes NO rate field. Yield exists only as
-// appreciation of totalAssets/totalSupply, so the APY is derived from two
-// hourly snapshots via SharePriceGrowthToAPY. sharePriceScaled is
-// totalAssets*1e36/totalSupply as a BigInt; the 1e36 cancels in the ratio, and
-// the ratio is taken in math/big because a 1e36-scaled integer does not survive
-// a float64 round trip.
-//
-// Other quirks absorbed here:
-//   - snapshots are event-driven hourly buckets, so they are IRREGULARLY spaced:
-//     elapsed comes from the two `timestamp`s we actually got, never assumed.
-//   - the subgraph carries no USD price at all, so TVL is valued with the shared
-//     Chainlink Pricer. Vaults whose asset has no usable feed are dropped, not
-//     assumed to be worth a dollar.
-//   - APYReward is structurally 0: MORPHO emissions are paid by an off-vault
-//     Universal Rewards Distributor and are not on-chain in this subgraph.
-//     Fabricating a number here would make the router chase yield that the
-//     vault does not actually pay.
 type MorphoBlue struct {
 	Chain     string
 	ID        string
-	MaxVaults int
-	MaxSnaps  int
 	MinWindow time.Duration
 	MaxWindow time.Duration
 }
 
-// NewMorphoBlue builds the adapter. There is no default subgraph id: the
-// deployment is ours and per chain, so an unset MORPHO_SUBGRAPH_ID_<chain>
-// leaves the adapter present-but-unconfigured rather than pointing at nothing.
+const (
+	morphoMaxVaults = 50
+	morphoMaxSnaps  = 25
+)
+
 func NewMorphoBlue(chain, subgraphID string, minWindow, maxWindow time.Duration) *MorphoBlue {
 	if minWindow <= 0 {
 		minWindow = DefaultMorphoMinWindow
@@ -57,11 +35,7 @@ func NewMorphoBlue(chain, subgraphID string, minWindow, maxWindow time.Duration)
 	if maxWindow < minWindow {
 		maxWindow = DefaultMorphoMaxWindow
 	}
-	return &MorphoBlue{
-		Chain: chain, ID: subgraphID,
-		MaxVaults: 50, MaxSnaps: 25,
-		MinWindow: minWindow, MaxWindow: maxWindow,
-	}
+	return &MorphoBlue{Chain: chain, ID: subgraphID, MinWindow: minWindow, MaxWindow: maxWindow}
 }
 
 func (m *MorphoBlue) Protocol() string   { return "morpho-blue" }
@@ -88,7 +62,7 @@ func (m *MorphoBlue) Query() string {
       totalAssets
     }
   }
-}`, m.MaxVaults, m.MaxSnaps)
+}`, morphoMaxVaults, morphoMaxSnaps)
 }
 
 type morphoSnapshot struct {
@@ -124,8 +98,6 @@ func (m *MorphoBlue) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 	now := nowUTC()
 	out := make([]venue.Venue, 0, len(res.Vaults))
 	for _, v := range res.Vaults {
-		// Guard the division that produced sharePriceScaled upstream: an empty
-		// vault has no price and no rate.
 		if supply := bigIntFromString(v.TotalSupply); supply == nil || supply.Sign() <= 0 {
 			continue
 		}
@@ -138,15 +110,13 @@ func (m *MorphoBlue) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 		if units <= 0 {
 			continue
 		}
-		// The subgraph reports token units only. No price, no venue: a wrong TVL
-		// misroutes just as badly as a wrong APY.
 		price, ok := p.USD(asset)
 		if !ok {
 			slog.Warn("morpho-blue: vault dropped, unpriceable", "vault", v.ID, "asset", asset, "symbol", v.AssetSymbol)
 			continue
 		}
 		tvl := units * price
-		poolID := strings.ToLower(v.ID) // executor allowlist keys on lowercase hex
+		poolID := strings.ToLower(v.ID)
 		out = append(out, venue.Venue{
 			ID:         venue.MakeID(m.Chain, m.Protocol(), poolID),
 			Chain:      m.Chain,
@@ -157,7 +127,7 @@ func (m *MorphoBlue) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 			TVLUsd:     tvl,
 			APY:        apy,
 			APYBase:    apy,
-			APYReward:  0, // see type comment: off-vault URD, not in this subgraph
+			APYReward:  0,
 			Stablecoin: isStable(asset),
 			UpdatedAt:  now,
 		})
@@ -165,10 +135,6 @@ func (m *MorphoBlue) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 	return out, nil
 }
 
-// vaultAPY derives the APY from the widest usable snapshot pair, or reports
-// !ok so the caller drops the vault. The rules for which samples are
-// trustworthy are shared with the intrinsic-rate sampler in growth.go:
-// publishing a rate we do not trust is worse than publishing no venue at all.
 func (m *MorphoBlue) vaultAPY(id string, snaps []morphoSnapshot) (float64, bool) {
 	samples := make([]GrowthSample, 0, len(snaps))
 	for _, s := range snaps {
