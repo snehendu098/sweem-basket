@@ -125,3 +125,93 @@ func TestAllowlistIsCached(t *testing.T) {
 		t.Fatalf("fetched the allowlist %d times, want 1", calls)
 	}
 }
+
+// Allowlisted is not the same as withdrawable. The allowlist is a static file;
+// utilisation moves hourly, so the live flag has to be honoured too.
+func TestBestRoutableSkipsIlliquidVenues(t *testing.T) {
+	s := routingServer(t,
+		[]marketdata.Venue{
+			{ID: "base:moonwell:0xaa", Project: "moonwell", Asset: "USDC", APY: 15.65,
+				LiquidityKnown: true, NotRoutable: "withdrawable liquidity $0.00 is below the $1000 floor"},
+			{ID: "base:aave-v3:0xbb", Project: "aave-v3", Asset: "USDC", APY: 4.2,
+				LiquidityKnown: true, LiquidityUsd: 24_000_000},
+		},
+		[]executor.AllowedVenue{
+			{ID: "base:moonwell:0xaa", ChainID: 8453, Symbol: "USDC"},
+			{ID: "base:aave-v3:0xbb", ChainID: 8453, Symbol: "USDC"},
+		},
+	)
+	v, note, err := s.bestRoutable(context.Background(), "USDC", "base")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if v.ID != "base:aave-v3:0xbb" {
+		t.Fatalf("routed into %s, which a depositor cannot exit", v.ID)
+	}
+	if !strings.Contains(note, "withdrawable") {
+		t.Fatalf("note %q must say why the better rate was refused", note)
+	}
+}
+
+// Advanced mode: the pin wins over the higher rate.
+func TestPinnedVenueIsUsedInsteadOfTheBest(t *testing.T) {
+	s := routingServer(t,
+		[]marketdata.Venue{
+			{ID: "base:moonwell:0xaa", Chain: "base", Project: "moonwell", Asset: "USDC", APY: 9},
+			{ID: "base:aave-v3:0xbb", Chain: "base", Project: "aave-v3", Asset: "USDC", APY: 4.2},
+		},
+		[]executor.AllowedVenue{
+			{ID: "base:moonwell:0xaa", ChainID: 8453, Symbol: "USDC"},
+			{ID: "base:aave-v3:0xbb", ChainID: 8453, Symbol: "USDC"},
+		},
+	)
+	v, err := s.pinnedRoutable(context.Background(), "base:aave-v3:0xbb", "USDC", "base")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if v.ID != "base:aave-v3:0xbb" {
+		t.Fatalf("routed to %s, want the pinned venue", v.ID)
+	}
+}
+
+// A pin is a preference, not an override of safety, and never a silent swap.
+func TestPinnedVenueFailingAGateIsRefusedNotSubstituted(t *testing.T) {
+	cases := []struct {
+		name   string
+		venues []marketdata.Venue
+		allow  []executor.AllowedVenue
+		pin    string
+	}{
+		{"illiquid",
+			[]marketdata.Venue{{ID: "base:moonwell:0xaa", Chain: "base", Asset: "USDC", APY: 15.65, NotRoutable: "withdrawable liquidity $0.00 is below the $1000 floor"}},
+			[]executor.AllowedVenue{{ID: "base:moonwell:0xaa", ChainID: 8453, Symbol: "USDC"}},
+			"base:moonwell:0xaa"},
+		{"not allowlisted",
+			[]marketdata.Venue{{ID: "base:moonwell:0xaa", Chain: "base", Asset: "USDC", APY: 9}},
+			[]executor.AllowedVenue{{ID: "base:aave-v3:0xbb", ChainID: 8453, Symbol: "USDC"}},
+			"base:moonwell:0xaa"},
+		{"wrong chain",
+			[]marketdata.Venue{{ID: "base:moonwell:0xaa", Chain: "base-sepolia", Asset: "USDC", APY: 9}},
+			[]executor.AllowedVenue{{ID: "base:moonwell:0xaa", ChainID: 8453, Symbol: "USDC"}},
+			"base:moonwell:0xaa"},
+		{"unpublished",
+			[]marketdata.Venue{{ID: "base:aave-v3:0xbb", Chain: "base", Asset: "USDC", APY: 4}},
+			[]executor.AllowedVenue{{ID: "base:aave-v3:0xbb", ChainID: 8453, Symbol: "USDC"}},
+			"base:moonwell:0xaa"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := routingServer(t, tc.venues, tc.allow)
+			v, err := s.pinnedRoutable(context.Background(), tc.pin, "USDC", "base")
+			if !errors.Is(err, ErrPinUnusable) {
+				t.Fatalf("err = %v, want ErrPinUnusable", err)
+			}
+			if v.ID != "" {
+				t.Fatalf("substituted %s for the pinned venue", v.ID)
+			}
+			if !strings.Contains(err.Error(), tc.pin) {
+				t.Fatalf("reason %q must name the pin", err)
+			}
+		})
+	}
+}

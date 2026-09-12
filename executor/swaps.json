@@ -1,5 +1,5 @@
 {
-  "_note": "Uniswap v3 swap-path allowlist. Same security boundary as venues.json: a path absent from this file is refused. Paths are static and were chosen by measuring price impact on chain - direct USDC pools for cbETH (-15.5% at $1k) and wstETH (-78.4% at $1k) are effectively dead, so those route through WETH. Fees are hundredths of a bip: 500 = 0.05%. Exits are the same hops reversed, quoted live with QuoterV2: WETH->USDC -0.0018%, cbBTC->USDC +0.0025%, wstETH->USDC -0.0034%, cbETH->USDC -0.0073% at $1,000. A hold venue you can enter and cannot leave is worse than no venue, so every entry path has its exit.",
+  "_note": "Uniswap v3 swap-path allowlist. Same security boundary as venues.json: a path absent from this file is refused. Paths are static and were chosen by measuring price impact on chain - direct USDC pools for cbETH (-15.5% at $1k) and wstETH (-78.4% at $1k) are effectively dead, so those route through WETH. Fees are hundredths of a bip: 500 = 0.05%. Exits are the same hops reversed, quoted live with QuoterV2 at $1,000: WETH -0.0018%, cbBTC +0.0025%, wstETH -0.0034%, cbETH -0.0073%, USDbC -0.0012%, USDS -0.0085%, GHO -0.0055%, rETH -0.0113%, EURC -0.0289%, AERO -0.0329%, weETH -0.0506%. A hold venue you can enter and cannot leave is worse than no venue, so every entry path has its exit. tBTC is deliberately absent: its only v3 pools (cbBTC/tBTC at 100 and 500) hold about $100 and quote -14.7% at $100 and -91% at $1,000, so it stays unreachable rather than reachable at a loss. Nine further assets were re-measured against Chainlink at $100 and $1,000 in both directions; five cleared and are listed here. Entries at $1,000: DAI -0.050% (direct/100), USDT +0.030% (direct/100), USDe -0.028% (direct/500), WBTC -0.108% (USDC-500-cbBTC-100), VIRTUAL -0.477% (USDC-500-WETH-500). Exits at $1,000: DAI -0.019%, USDT -0.050%, USDe -0.073%, WBTC -0.017%, VIRTUAL +0.018%. Four failed the 0.5% bound on the EXIT leg on every v3 route tried, so they stay unreachable rather than reachable one-way: AAVE -0.644% (best exit, WETH500/3000), MORPHO -0.634% (WETH500/3000), VVV -0.690% (direct/3000), LINK -0.886% (direct/3000). Their entries all quoted better than -0.4%, which is why a buy-only pass looked like they cleared. Also measured and refused: tBTC -85%, LBTC -99.9%, ezETH -47.7%, AERO -0.539% on v3 (its depth is on Aerodrome), sUSDS -100%, cbXRP/DEGEN/COMP/WELL/MOG all worse than -1%.",
   "paths": [
     {
       "chain_id": 8453,
@@ -75,6 +75,130 @@
     },
     {
       "chain_id": 8453,
+      "from": "USDC",
+      "to": "AERO",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "EURC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "GHO",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x6Bb7a212910682DCFdbd5BCBb3e28FB4E8da10Ee",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "USDS",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x820C137fa70C8691f0e44Dc420a5e53c168921Dc",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "USDbC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "rETH",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "weETH",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
       "from": "WETH",
       "to": "USDC",
       "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
@@ -138,6 +262,306 @@
         {
           "token": "0x4200000000000000000000000000000000000006",
           "fee": 500
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "AERO",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 3000
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "EURC",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "GHO",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x6Bb7a212910682DCFdbd5BCBb3e28FB4E8da10Ee",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDS",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x820C137fa70C8691f0e44Dc420a5e53c168921Dc",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDbC",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "rETH",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xB6fe221Fe9EeF5aBa221c348bA20A1Bf5e73624c",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "weETH",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 100
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "DAI",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "DAI",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "USDT",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDT",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+      "token_in_decimals": 6,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "USDe",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDe",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "VIRTUAL",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "VIRTUAL",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "WBTC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 8,
+      "hops": [
+        {
+          "token": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+          "fee": 500
+        },
+        {
+          "token": "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "WBTC",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
+      "token_in_decimals": 8,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+          "fee": 100
         },
         {
           "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",

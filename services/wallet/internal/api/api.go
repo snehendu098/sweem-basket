@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
@@ -64,16 +65,51 @@ func (s *Server) bestRoutable(ctx context.Context, asset, chain string) (marketd
 		return marketdata.Venue{}, "", marketdata.ErrNoVenue
 	}
 
-	var passed []marketdata.Venue
+	var passed []unreachable
 	for _, v := range venues {
 		if _, ok := allow[v.ID]; !ok {
-			passed = append(passed, v)
+			passed = append(passed, unreachable{v, "this executor cannot transact"})
+			continue
+		}
+		if v.NotRoutable != "" {
+			passed = append(passed, unreachable{v, v.NotRoutable})
 			continue
 		}
 		return v, downgradeNote(passed, v), nil
 	}
 	return marketdata.Venue{}, "", fmt.Errorf("%w for %s on %s", ErrNoRoutableVenue, asset, chain)
 }
+
+// A pin is a preference, not an override of safety: it must clear every gate
+// bestRoutable clears, and failing one fails the leg rather than substituting.
+func (s *Server) pinnedRoutable(ctx context.Context, venueID, asset, chain string) (marketdata.Venue, error) {
+	allow, err := s.Executor.Allowlist(ctx)
+	if err != nil {
+		return marketdata.Venue{}, fmt.Errorf("executor allowlist unavailable: %w", err)
+	}
+	venues, err := s.Market.Venues(ctx, asset, chain, s.MinVenueTVL, 100)
+	if err != nil {
+		return marketdata.Venue{}, err
+	}
+	for _, v := range venues {
+		if v.ID != venueID {
+			continue
+		}
+		switch {
+		case !strings.EqualFold(v.Chain, chain):
+			return marketdata.Venue{}, fmt.Errorf("%w: pinned venue %s is on %s, not %s", ErrPinUnusable, venueID, v.Chain, chain)
+		case v.NotRoutable != "":
+			return marketdata.Venue{}, fmt.Errorf("%w: pinned venue %s is not routable: %s", ErrPinUnusable, venueID, v.NotRoutable)
+		}
+		if _, ok := allow[venueID]; !ok {
+			return marketdata.Venue{}, fmt.Errorf("%w: pinned venue %s is not on the executor allowlist", ErrPinUnusable, venueID)
+		}
+		return v, nil
+	}
+	return marketdata.Venue{}, fmt.Errorf("%w: pinned venue %s is not published for %s on %s", ErrPinUnusable, venueID, asset, chain)
+}
+
+var ErrPinUnusable = errors.New("pinned venue unusable")
 
 const QuoteAsset = "USDC"
 
@@ -97,14 +133,19 @@ func (s *Server) swapFundable(ctx context.Context, asset, chain string) error {
 	return nil
 }
 
-func downgradeNote(passed []marketdata.Venue, chosen marketdata.Venue) string {
+type unreachable struct {
+	venue marketdata.Venue
+	why   string
+}
+
+func downgradeNote(passed []unreachable, chosen marketdata.Venue) string {
 	if len(passed) == 0 {
 		return ""
 	}
 	best := passed[0]
 	return fmt.Sprintf(
-		"best rate is %.2f%% at %s, which this executor cannot transact; routing to %s at %.2f%% instead",
-		best.APY, best.Project, chosen.Project, chosen.APY)
+		"best rate is %.2f%% at %s, which %s; routing to %s at %.2f%% instead",
+		best.venue.APY, best.venue.Project, best.why, chosen.Project, chosen.APY)
 }
 
 func (s *Server) Routes() http.Handler {

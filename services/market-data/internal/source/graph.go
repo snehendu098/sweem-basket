@@ -90,9 +90,9 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 			}
 
 			kept := venues[:0]
-			for _, v := range venues {
-				if g.Filter.Accept(v) {
-					kept = append(kept, v)
+			for i := range venues {
+				if g.Filter.Screen(&venues[i]) {
+					kept = append(kept, venues[i])
 				}
 			}
 			st.OK, st.Venues, st.LastSuccess = true, len(kept), st.LastAttempt

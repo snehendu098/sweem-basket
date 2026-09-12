@@ -8,15 +8,15 @@ func TestValidateWeights(t *testing.T) {
 		in      []Weight
 		wantErr bool
 	}{
-		{"single asset full weight", []Weight{{"USDC", 10000}}, false},
-		{"even three way", []Weight{{"USDC", 4000}, {"WETH", 3000}, {"CBBTC", 3000}}, false},
+		{"single asset full weight", []Weight{{"USDC", 10000, ""}}, false},
+		{"even three way", []Weight{{"USDC", 4000, ""}, {"WETH", 3000, ""}, {"CBBTC", 3000, ""}}, false},
 		{"empty", nil, true},
-		{"sum under", []Weight{{"USDC", 5000}}, true},
-		{"sum over", []Weight{{"USDC", 6000}, {"WETH", 5000}}, true},
-		{"duplicate asset", []Weight{{"USDC", 5000}, {"USDC", 5000}}, true},
-		{"zero weight", []Weight{{"USDC", 10000}, {"WETH", 0}}, true},
-		{"negative weight", []Weight{{"USDC", 11000}, {"WETH", -1000}}, true},
-		{"empty asset name", []Weight{{"", 10000}}, true},
+		{"sum under", []Weight{{"USDC", 5000, ""}}, true},
+		{"sum over", []Weight{{"USDC", 6000, ""}, {"WETH", 5000, ""}}, true},
+		{"duplicate asset", []Weight{{"USDC", 5000, ""}, {"USDC", 5000, ""}}, true},
+		{"zero weight", []Weight{{"USDC", 10000, ""}, {"WETH", 0, ""}}, true},
+		{"negative weight", []Weight{{"USDC", 11000, ""}, {"WETH", -1000, ""}}, true},
+		{"empty asset name", []Weight{{"", 10000, ""}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -25,5 +25,20 @@ func TestValidateWeights(t *testing.T) {
 				t.Fatalf("ValidateWeights(%v) error = %v, wantErr %v", tt.in, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// A pin names a venue, which already names the instrument; asking for the
+// family too is two different answers to the same question.
+func TestValidateWeightsRejectsFamilyWithAPin(t *testing.T) {
+	err := ValidateWeights([]Weight{{"USD", 10000, "base:aave-v3:0x83"}})
+	if err == nil {
+		t.Fatal("a family weight with a venue pin was accepted")
+	}
+	if err := ValidateWeights([]Weight{{"USDC", 10000, "base:aave-v3:0x83"}}); err != nil {
+		t.Fatalf("pinning an instrument is legal: %v", err)
+	}
+	if err := ValidateWeights([]Weight{{"USD", 10000, ""}}); err != nil {
+		t.Fatalf("an unpinned family weight is legal: %v", err)
 	}
 }

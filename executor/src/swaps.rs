@@ -303,6 +303,28 @@ mod tests {
         );
         assert_eq!(packed.len(), 20 + 3 + 20 + 3 + 20);
         assert_eq!(hex::encode(weth().packed()), "833589fcd6edb6e08f4c7c32d4f71b54bda029130001f44200000000000000000000000000000000000006");
+
+        let weeth = registry().get(8453, "USDC", "weETH").unwrap().packed();
+        assert_eq!(
+            hex::encode(&weeth),
+            "833589fcd6edb6e08f4c7c32d4f71b54bda029130001f4420000000000000000000000000000000000000600006404c0599ae5a44757c0af6f9ec3b93da8976c150a"
+        );
+        let aero = registry().get(8453, "AERO", "USDC").unwrap().packed();
+        assert_eq!(
+            hex::encode(&aero),
+            "940181a94a35a4569e4529a3cdfb74e38fd98631000bb842000000000000000000000000000000000000060001f4833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        );
+
+        let wbtc = registry().get(8453, "USDC", "WBTC").unwrap().packed();
+        assert_eq!(
+            hex::encode(&wbtc),
+            "833589fcd6edb6e08f4c7c32d4f71b54bda029130001f4cbb7c0000ab88b473b1f5afd9ef808440eed33bf0000640555e30da8f98308edb960aa94c0db47230d2b9c"
+        );
+        let virtual_ = registry().get(8453, "VIRTUAL", "USDC").unwrap().packed();
+        assert_eq!(
+            hex::encode(&virtual_),
+            "0b3e328455c4059eeb9e3f84b5543f74e24e7e1b0001f442000000000000000000000000000000000000060001f4833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        );
     }
 
     #[test]
@@ -383,7 +405,14 @@ mod tests {
         assert!(r.get(8453, "USDC", "WETH").is_some());
         assert!(r.get(8453, "USDC", "DOGE").is_none(), "unlisted asset");
         assert!(r.get(84532, "USDC", "WETH").is_none(), "path is chain-scoped");
-        for sym in ["WETH", "cbBTC", "wstETH", "cbETH"] {
+        for sym in ["tBTC", "AAVE", "LINK", "MORPHO", "VVV"] {
+            assert!(r.get(8453, "USDC", sym).is_none(), "{sym}: no v3 route under the impact bound");
+            assert!(r.get(8453, sym, "USDC").is_none(), "{sym}: refused in both directions");
+        }
+        for sym in [
+            "WETH", "cbBTC", "wstETH", "cbETH", "AERO", "EURC", "GHO", "USDS", "USDbC", "rETH",
+            "weETH", "DAI", "USDT", "USDe", "VIRTUAL", "WBTC",
+        ] {
             let out = r.get(8453, "USDC", sym).expect("entry");
             let back = r.get(8453, sym, "USDC").expect("exit");
             assert_eq!(back.token_in, out.token_out(), "{sym} exit must start at the token");

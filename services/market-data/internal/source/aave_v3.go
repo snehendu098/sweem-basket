@@ -32,7 +32,9 @@ func (a *AaveV3) Query() string {
     decimals
     underlyingAsset
     liquidityRate
+    variableBorrowIndex
     totalLiquidity
+    availableLiquidity
     isActive
     isFrozen
     isPaused
@@ -43,16 +45,18 @@ func (a *AaveV3) Query() string {
 
 type aaveReserves struct {
 	Reserves []struct {
-		ID              string `json:"id"`
-		Symbol          string `json:"symbol"`
-		Decimals        int    `json:"decimals"`
-		UnderlyingAsset string `json:"underlyingAsset"`
-		LiquidityRate   string `json:"liquidityRate"`
-		TotalLiquidity  string `json:"totalLiquidity"`
-		IsActive        bool   `json:"isActive"`
-		IsFrozen        bool   `json:"isFrozen"`
-		IsPaused        bool   `json:"isPaused"`
-		Price           struct {
+		ID                  string `json:"id"`
+		Symbol              string `json:"symbol"`
+		Decimals            int    `json:"decimals"`
+		UnderlyingAsset     string `json:"underlyingAsset"`
+		LiquidityRate       string `json:"liquidityRate"`
+		VariableBorrowIndex string `json:"variableBorrowIndex"`
+		TotalLiquidity      string `json:"totalLiquidity"`
+		AvailableLiquidity  string `json:"availableLiquidity"`
+		IsActive            bool   `json:"isActive"`
+		IsFrozen            bool   `json:"isFrozen"`
+		IsPaused            bool   `json:"isPaused"`
+		Price               struct {
 			PriceInEth string `json:"priceInEth"`
 			Oracle     struct {
 				BaseCurrencyUnit string `json:"baseCurrencyUnit"`
@@ -86,20 +90,30 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 		}
 		poolID := strings.ToLower(r.ID)
 		out = append(out, venue.Venue{
-			ID:         venue.MakeID(a.Chain, a.Protocol(), poolID),
-			Chain:      a.Chain,
-			Project:    a.Protocol(),
-			Symbol:     r.Symbol,
-			PoolID:     poolID,
-			Asset:      asset,
-			TVLUsd:     supply * price,
-			APY:        apy,
-			APYBase:    apy,
-			Stablecoin: isStable(asset),
-			UpdatedAt:  now,
+			LiquidityUsd:   max(0, decimalFloat(r.AvailableLiquidity, r.Decimals)) * price,
+			LiquidityKnown: true,
+			CollateralOnly: collateralOnly(bigIntFromString(r.VariableBorrowIndex), bigIntFromString(r.LiquidityRate)),
+			ID:             venue.MakeID(a.Chain, a.Protocol(), poolID),
+			Chain:          a.Chain,
+			Project:        a.Protocol(),
+			Symbol:         r.Symbol,
+			PoolID:         poolID,
+			Asset:          asset,
+			TVLUsd:         supply * price,
+			APY:            apy,
+			APYBase:        apy,
+			Stablecoin:     isStable(asset),
+			UpdatedAt:      now,
 		})
 	}
 	return out, nil
+}
+
+// A reserve that never accrued a borrow and pays nothing was opened as
+// collateral only; its 0% is structural, not a failed measurement.
+func collateralOnly(variableBorrowIndex, liquidityRate *big.Int) bool {
+	return variableBorrowIndex != nil && liquidityRate != nil &&
+		variableBorrowIndex.Cmp(rayOne) == 0 && liquidityRate.Sign() == 0
 }
 
 func scaledFloat(value, unit string) float64 {

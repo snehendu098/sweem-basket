@@ -18,10 +18,31 @@ type Source interface {
 }
 
 type Filter struct {
-	Chains       []string
-	MinTVLUsd    float64
-	MaxAPY       float64
-	AllowZeroAPY bool
+	Chains          []string
+	MinTVLUsd       float64
+	MinLiquidityUsd float64
+	MaxAPY          float64
+	AllowZeroAPY    bool
+}
+
+// Screen stamps why a venue may not be routed, then answers whether it is
+// publishable at all. Both callers of Accept go through here so the publisher
+// and gen-venues cannot disagree about the same venue.
+func (f Filter) Screen(v *venue.Venue) bool {
+	v.NotRoutable = f.notRoutable(*v)
+	return f.Accept(*v)
+}
+
+func (f Filter) notRoutable(v venue.Venue) string {
+	switch {
+	case v.CollateralOnly:
+		return "borrowing was never enabled on this reserve: it pays no supply rate"
+	case !v.LiquidityKnown:
+		return ""
+	case v.LiquidityUsd < f.MinLiquidityUsd:
+		return fmt.Sprintf("withdrawable liquidity $%.2f is below the $%.0f floor", v.LiquidityUsd, f.MinLiquidityUsd)
+	}
+	return ""
 }
 
 func (f Filter) Accept(v venue.Venue) bool {
@@ -58,6 +79,9 @@ func FilterFor(c Chain) Filter {
 		MinTVLUsd:    envFloatForChain("MIN_TVL_USD", c, testnet, pick(testnet, 0, 5_000)),
 		MaxAPY:       envFloatForChain("MAX_APY", c, testnet, pick(testnet, 1000, 100)),
 		AllowZeroAPY: testnet,
+		// $1,000 is the size swaps.json price impact was measured at: a venue
+		// that cannot return that much is not a venue you can leave.
+		MinLiquidityUsd: envFloatForChain("MIN_LIQUIDITY_USD", c, testnet, pick(testnet, 0, 1_000)),
 	}
 	return f
 }

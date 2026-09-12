@@ -13,9 +13,9 @@ func TestGroupWeights(t *testing.T) {
 		{
 			name: "two baskets interleaved by the query's ordering",
 			rows: []basketWeight{
-				{"b1", "USDC", 6000},
-				{"b1", "WETH", 4000},
-				{"b2", "DAI", 10000},
+				{"b1", "USDC", 6000, ""},
+				{"b1", "WETH", 4000, ""},
+				{"b2", "DAI", 10000, ""},
 			},
 			want: map[string][]Weight{
 				"b1": {{Asset: "USDC", WeightBps: 6000}, {Asset: "WETH", WeightBps: 4000}},
@@ -24,7 +24,7 @@ func TestGroupWeights(t *testing.T) {
 		},
 		{
 			name: "single basket",
-			rows: []basketWeight{{"b1", "USDC", 10000}},
+			rows: []basketWeight{{"b1", "USDC", 10000, ""}},
 			want: map[string][]Weight{"b1": {{Asset: "USDC", WeightBps: 10000}}},
 		},
 		{name: "no rows", rows: nil, want: map[string][]Weight{}},
@@ -54,7 +54,7 @@ func TestGroupWeights(t *testing.T) {
 // Grouped weights must still satisfy the basket invariant.
 func TestGroupWeightsPreservesTheBpsInvariant(t *testing.T) {
 	got := groupWeights([]basketWeight{
-		{"b1", "USDC", 6000}, {"b1", "WETH", 4000},
+		{"b1", "USDC", 6000, ""}, {"b1", "WETH", 4000, ""},
 	})
 	if err := ValidateWeights(got["b1"]); err != nil {
 		t.Errorf("grouped weights failed validation: %v", err)

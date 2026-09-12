@@ -17,6 +17,7 @@ const (
 	SelSymbol          = "0x95d89b41"
 	SelDecimals        = "0x313ce567"
 	SelTotalSupply     = "0x18160ddd"
+	SelBalanceOf       = "0x70a08231"
 	SelAsset           = "0x38d52e0f"
 	SelBaseToken       = "0xc55dae63"
 	SelUnderlying      = "0x6f307dc3"

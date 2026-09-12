@@ -1,14 +1,16 @@
 {
   "_generated": {
     "by": "services/market-data/cmd/gen-venues",
-    "at": "2026-09-12T20:20:04Z",
+    "at": "2026-09-12T22:37:51Z",
     "how": "go run ./services/market-data/cmd/gen-venues -out executor/venues.json",
     "note": "GENERATED — do not edit by hand; re-run the generator or the next run drops your change.",
     "rules": [
       "encodable: protocol maps to a VenueKind the executor implements",
       "priceable: underlying has a verified Chainlink feed on that chain",
       "liquid: clears the TVL floor",
+      "withdrawable: clears the MIN_LIQUIDITY_USD floor on measured, live withdrawable liquidity",
       "verified: symbol/decimals plus a protocol identity check, on chain",
+      "familied: a human has decided the asset's substitution family (or that it has none)",
       "id equals venue.MakeID(chain, project, pool)"
     ]
   },
@@ -158,15 +160,6 @@
       "symbol": "WETH"
     },
     {
-      "id": "base:compound-v3:0x784efeb622244d2348d4f2522f8860b96fbece89",
-      "kind": "compound_v3",
-      "chain_id": 8453,
-      "target": "0x784efeb622244d2348d4f2522f8860b96fbece89",
-      "asset": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
-      "asset_decimals": 18,
-      "symbol": "AERO"
-    },
-    {
       "id": "base:compound-v3:0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf",
       "kind": "compound_v3",
       "chain_id": 8453,
@@ -239,24 +232,6 @@
       "symbol": "tBTC"
     },
     {
-      "id": "base:moonwell:0xb6419c6c2e60c4025d6d06ee4f913ce89425a357",
-      "kind": "ctoken",
-      "chain_id": 8453,
-      "target": "0xb6419c6c2e60c4025d6d06ee4f913ce89425a357",
-      "asset": "0x820c137fa70c8691f0e44dc420a5e53c168921dc",
-      "asset_decimals": 18,
-      "symbol": "USDS"
-    },
-    {
-      "id": "base:moonwell:0xb682c840b5f4fc58b20769e691a6fa1305a501a2",
-      "kind": "ctoken",
-      "chain_id": 8453,
-      "target": "0xb682c840b5f4fc58b20769e691a6fa1305a501a2",
-      "asset": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
-      "asset_decimals": 6,
-      "symbol": "EURC"
-    },
-    {
       "id": "base:moonwell:0xb8051464c8c92209c92f3a4cd9c73746c4c3cfb3",
       "kind": "ctoken",
       "chain_id": 8453,
@@ -275,15 +250,6 @@
       "symbol": "rETH"
     },
     {
-      "id": "base:moonwell:0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
-      "kind": "ctoken",
-      "chain_id": 8453,
-      "target": "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
-      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "asset_decimals": 6,
-      "symbol": "USDC"
-    },
-    {
       "id": "base:moonwell:0xf877acafa28c19b96727966690b2f44d35ad5976",
       "kind": "ctoken",
       "chain_id": 8453,
@@ -291,6 +257,15 @@
       "asset": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
       "asset_decimals": 8,
       "symbol": "cbBTC"
+    },
+    {
+      "id": "base:morpho-blue:0x1401d1271c47648ac70cbcdfa3776d4a87ce006b",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0x1401d1271c47648ac70cbcdfa3776d4a87ce006b",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
     },
     {
       "id": "base:morpho-blue:0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a",

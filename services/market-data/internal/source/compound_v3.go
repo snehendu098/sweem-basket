@@ -28,7 +28,7 @@ func (c *CompoundV3) Query() string {
   markets(first: %d) {
     id
     configuration { symbol baseToken { token { address symbol decimals } } }
-    accounting { totalBaseSupplyUsd supplyApr rewardSupplyApr netSupplyApr }
+    accounting { totalBaseSupplyUsd totalBaseBorrowUsd supplyApr rewardSupplyApr netSupplyApr }
   }
 }`, cometMaxMarkets)
 }
@@ -47,6 +47,7 @@ type cometMarkets struct {
 		} `json:"configuration"`
 		Accounting struct {
 			TotalBaseSupplyUsd string `json:"totalBaseSupplyUsd"`
+			TotalBaseBorrowUsd string `json:"totalBaseBorrowUsd"`
 			SupplyApr          string `json:"supplyApr"`
 			RewardSupplyApr    string `json:"rewardSupplyApr"`
 			NetSupplyApr       string `json:"netSupplyApr"`
@@ -78,18 +79,20 @@ func (c *CompoundV3) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 		asset := ResolveAsset([]string{tok.Address}, tok.Symbol)
 		poolID := strings.ToLower(mk.ID)
 		out = append(out, venue.Venue{
-			ID:         venue.MakeID(c.Chain, c.Protocol(), poolID),
-			Chain:      c.Chain,
-			Project:    c.Protocol(),
-			Symbol:     mk.Configuration.Symbol,
-			PoolID:     poolID,
-			Asset:      asset,
-			TVLUsd:     tvl,
-			APY:        apy,
-			APYBase:    apyBase,
-			APYReward:  apy - apyBase,
-			Stablecoin: isStable(asset),
-			UpdatedAt:  now,
+			LiquidityUsd:   max(0, tvl-parseDecimal(mk.Accounting.TotalBaseBorrowUsd)),
+			LiquidityKnown: true,
+			ID:             venue.MakeID(c.Chain, c.Protocol(), poolID),
+			Chain:          c.Chain,
+			Project:        c.Protocol(),
+			Symbol:         mk.Configuration.Symbol,
+			PoolID:         poolID,
+			Asset:          asset,
+			TVLUsd:         tvl,
+			APY:            apy,
+			APYBase:        apyBase,
+			APYReward:      apy - apyBase,
+			Stablecoin:     isStable(asset),
+			UpdatedAt:      now,
 		})
 	}
 	return out, nil

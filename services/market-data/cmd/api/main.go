@@ -210,7 +210,9 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, http.StatusBadGateway, "store_unavailable", "could not read venues from redis")
 		return
 	}
-	httpx.OK(w, map[string]any{"assets": assets, "count": len(assets)})
+	httpx.OK(w, map[string]any{
+		"assets": assets, "count": len(assets), "families": store.Families(assets),
+	})
 }
 
 func (s *server) sources(w http.ResponseWriter, r *http.Request) {

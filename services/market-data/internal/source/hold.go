@@ -112,19 +112,21 @@ func (h *Hold) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 		}
 		poolID := strings.ToLower(f.ID)
 		out = append(out, venue.Venue{
-			ID:           venue.MakeID(h.Chain, h.Protocol(), poolID),
-			Chain:        h.Chain,
-			Project:      h.Protocol(),
-			Symbol:       f.Symbol,
-			PoolID:       poolID,
-			Asset:        asset,
-			TVLUsd:       units * price,
-			APY:          apy,
-			APYBase:      0,
-			APYReward:    0,
-			APYIntrinsic: apy,
-			Stablecoin:   isStable(asset),
-			UpdatedAt:    now,
+			LiquidityUsd:   units * price,
+			LiquidityKnown: true,
+			ID:             venue.MakeID(h.Chain, h.Protocol(), poolID),
+			Chain:          h.Chain,
+			Project:        h.Protocol(),
+			Symbol:         f.Symbol,
+			PoolID:         poolID,
+			Asset:          asset,
+			TVLUsd:         units * price,
+			APY:            apy,
+			APYBase:        0,
+			APYReward:      0,
+			APYIntrinsic:   apy,
+			Stablecoin:     isStable(asset),
+			UpdatedAt:      now,
 		})
 	}
 	return out, nil

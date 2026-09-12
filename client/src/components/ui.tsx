@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, TriangleAlert } from "lucide-react";
 import {
   basescanTx,
   displayAsset,
@@ -170,6 +170,14 @@ export function Picker<T extends string>({
   );
 }
 
+export function WarningMark({ label }: { label: string }) {
+  return (
+    <Tooltip label={label}>
+      <TriangleAlert aria-label={label} className="size-3.5 shrink-0 text-warning" />
+    </Tooltip>
+  );
+}
+
 export function Tooltip({
   label,
   children,
@@ -189,112 +197,6 @@ export function Tooltip({
         {label}
       </span>
     </span>
-  );
-}
-
-type MultiOption<T extends string> = {
-  value: T;
-  label: string;
-  hint?: string;
-  icon?: React.ReactNode;
-  disabled?: boolean;
-  reason?: string;
-};
-
-export function MultiPicker<T extends string>({
-  values,
-  onToggle,
-  options,
-  placeholder = "Select tokens",
-  disabled,
-  ariaLabel,
-  className,
-}: {
-  values: readonly T[];
-  onToggle: (v: T) => void;
-  options: readonly MultiOption<T>[];
-  placeholder?: string;
-  disabled?: boolean;
-  ariaLabel: string;
-  className?: string;
-}) {
-  const { open, setOpen, ref } = useDismissable();
-  const chosen = options.filter((o) => values.includes(o.value));
-
-  return (
-    <div className={cn("relative", className)} ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={disabled || options.length === 0}
-        aria-label={ariaLabel}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:text-muted-foreground"
-      >
-        {chosen.length === 0 ? (
-          <span className="text-muted-foreground">{placeholder}</span>
-        ) : (
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {chosen.map((o) => (
-              <span
-                key={o.value}
-                className="inline-flex items-center gap-1.5 rounded-full bg-background px-2 py-0.5 text-xs font-medium"
-              >
-                {o.icon}
-                {o.label}
-              </span>
-            ))}
-          </span>
-        )}
-        <ChevronDown className="ml-auto size-4 shrink-0 text-muted-foreground" />
-      </button>
-      {open && (
-        <ul className="absolute left-0 right-0 z-30 mt-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-xl">
-          {options.map((o) => {
-            const on = values.includes(o.value);
-            const row = (
-              <button
-                type="button"
-                aria-disabled={o.disabled}
-                aria-pressed={on}
-                onClick={() => !o.disabled && onToggle(o.value)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
-                  o.disabled
-                    ? "cursor-not-allowed opacity-40"
-                    : "hover:bg-secondary/70",
-                )}
-              >
-                <span
-                  className={cn(
-                    "grid size-4 shrink-0 place-items-center rounded border",
-                    on ? "border-foreground bg-foreground" : "border-border",
-                  )}
-                >
-                  {on && <Check className="size-3 text-background" />}
-                </span>
-                {o.icon}
-                <span className="truncate">{o.label}</span>
-                {o.hint && (
-                  <span className="tnum ml-auto text-xs text-positive">{o.hint}</span>
-                )}
-              </button>
-            );
-            return (
-              <li key={o.value}>
-                {o.disabled && o.reason ? (
-                  <Tooltip label={o.reason} className="w-full">
-                    {row}
-                  </Tooltip>
-                ) : (
-                  row
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
   );
 }
 

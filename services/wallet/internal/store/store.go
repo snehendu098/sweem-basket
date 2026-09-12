@@ -83,8 +83,8 @@ func (s *Store) CreateBasket(ctx context.Context, b Basket) (Basket, error) {
 
 	for _, w := range b.Weights {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO basket_weights (basket_id, asset, weight_bps) VALUES ($1,$2,$3)`,
-			b.ID, w.Asset, w.WeightBps,
+			`INSERT INTO basket_weights (basket_id, asset, weight_bps, venue_id) VALUES ($1,$2,$3,$4)`,
+			b.ID, w.Asset, w.WeightBps, nullable(w.VenueID),
 		); err != nil {
 			return Basket{}, fmt.Errorf("store: insert weight %s: %w", w.Asset, err)
 		}
@@ -110,7 +110,7 @@ func (s *Store) Basket(ctx context.Context, id string) (Basket, error) {
 
 func (s *Store) weights(ctx context.Context, basketID string) ([]Weight, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT asset, weight_bps FROM basket_weights WHERE basket_id = $1 ORDER BY weight_bps DESC`,
+		`SELECT asset, weight_bps, venue_id FROM basket_weights WHERE basket_id = $1 ORDER BY weight_bps DESC`,
 		basketID)
 	if err != nil {
 		return nil, err
@@ -119,9 +119,11 @@ func (s *Store) weights(ctx context.Context, basketID string) ([]Weight, error) 
 	out := []Weight{}
 	for rows.Next() {
 		var w Weight
-		if err := rows.Scan(&w.Asset, &w.WeightBps); err != nil {
+		var venueID *string
+		if err := rows.Scan(&w.Asset, &w.WeightBps, &venueID); err != nil {
 			return nil, err
 		}
+		w.VenueID = deref(venueID)
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -181,7 +183,7 @@ func (s *Store) weightsFor(ctx context.Context, basketIDs []string) (map[string]
 		return map[string][]Weight{}, nil
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT basket_id, asset, weight_bps FROM basket_weights
+		`SELECT basket_id, asset, weight_bps, venue_id FROM basket_weights
 		 WHERE basket_id = ANY($1) ORDER BY basket_id, weight_bps DESC`,
 		basketIDs)
 	if err != nil {
@@ -191,9 +193,11 @@ func (s *Store) weightsFor(ctx context.Context, basketIDs []string) (map[string]
 	flat := []basketWeight{}
 	for rows.Next() {
 		var bw basketWeight
-		if err := rows.Scan(&bw.BasketID, &bw.Asset, &bw.WeightBps); err != nil {
+		var venueID *string
+		if err := rows.Scan(&bw.BasketID, &bw.Asset, &bw.WeightBps, &venueID); err != nil {
 			return nil, err
 		}
+		bw.VenueID = deref(venueID)
 		flat = append(flat, bw)
 	}
 	if err := rows.Err(); err != nil {
@@ -206,12 +210,27 @@ type basketWeight struct {
 	BasketID  string
 	Asset     string
 	WeightBps int
+	VenueID   string
+}
+
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func groupWeights(rows []basketWeight) map[string][]Weight {
 	out := make(map[string][]Weight)
 	for _, r := range rows {
-		out[r.BasketID] = append(out[r.BasketID], Weight{Asset: r.Asset, WeightBps: r.WeightBps})
+		out[r.BasketID] = append(out[r.BasketID], Weight{Asset: r.Asset, WeightBps: r.WeightBps, VenueID: r.VenueID})
 	}
 	return out
 }

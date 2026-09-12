@@ -31,6 +31,27 @@ export function Reveal({
   );
 }
 
+export function Pop({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const reduced = useReducedMotion();
+  if (reduced) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.18, ease: EASE }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export function CountUp({
   value,
   format,

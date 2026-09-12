@@ -8,7 +8,7 @@ export type Me = {
   created_at: string;
 };
 
-export type Weight = { asset: string; weight_bps: number };
+export type Weight = { asset: string; weight_bps: number; venue_id?: string };
 
 export type BasketSummary = {
   id: string;
@@ -66,6 +66,10 @@ export type Venue = {
   apy_reward: number;
   stablecoin: boolean;
   updated_at: string;
+  liquidity_usd?: number;
+  liquidity_known?: boolean;
+  collateral_only?: boolean;
+  not_routable?: string;
 };
 
 export type AssetSummary = {
@@ -75,6 +79,21 @@ export type AssetSummary = {
   best_apy: number;
   best_venue: string;
   total_tvl_usd: number;
+  family?: string;
+  routable_venues?: number;
+  best_apy_base?: number;
+  best_apy_reward?: number;
+  best_apy_intrinsic?: number;
+};
+
+export type Family = {
+  family: string;
+  chain: string;
+  instruments: string[] | null;
+  best_asset: string;
+  best_apy: number;
+  best_venue: string;
+  venues: number;
 };
 
 export type PlanLeg = {

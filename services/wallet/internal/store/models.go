@@ -14,9 +14,13 @@ type User struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// Asset is either an instrument (USDC, wstETH) or a family (USD, ETH); VenueID
+// pins the leg to one venue and already implies its instrument, so a weight
+// carries a family or a pin, never both.
 type Weight struct {
 	Asset     string `json:"asset"`
 	WeightBps int    `json:"weight_bps"`
+	VenueID   string `json:"venue_id,omitempty"`
 }
 
 type Basket struct {
@@ -33,6 +37,8 @@ type Basket struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// Asset is always a concrete instrument: a family picks one at deposit and the
+// keeper then only ever moves it between venues OF that instrument.
 type Position struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`

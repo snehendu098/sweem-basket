@@ -117,6 +117,7 @@ func aaveReturns(cfg, rate *big.Int) map[string]string {
 		strings.ToLower(poolBase) + SelGetReservesList:                                       addressList(usdcBase),
 		strings.ToLower(poolBase) + strings.ToLower(AddressArg(SelGetReserveData, usdcBase)): reserveData(cfg, rate, aUSDCBase),
 		aUSDCBase + SelTotalSupply:                                                           "0x" + wordN(1_000_000_000_000), // 1e6 USDC at 6 decimals
+		strings.ToLower(usdcBase) + strings.ToLower(AddressArg(SelBalanceOf, aUSDCBase)):     "0x" + wordN(900_000_000_000),   // 900k USDC withdrawable
 	}
 }
 
@@ -227,12 +228,13 @@ func TestRevertingCallOmitsRatherThanZeroes(t *testing.T) {
 func cometReturns(perSecond int64) map[string]string {
 	util := big.NewInt(905253049459064200)
 	return map[string]string{
-		strings.ToLower(cometBase) + SelSymbol:                                        abiString("cUSDCv3"),
-		strings.ToLower(cometBase) + SelBaseToken:                                     "0x" + addrWord(usdcBase),
-		strings.ToLower(cometBase) + SelDecimals:                                      "0x" + wordN(6),
-		strings.ToLower(cometBase) + SelTotalSupply:                                   "0x" + wordN(1_000_000_000_000),
-		strings.ToLower(cometBase) + SelGetUtilization:                                "0x" + word(util),
-		strings.ToLower(cometBase) + strings.ToLower(UintArg(SelGetSupplyRate, util)): "0x" + wordN(perSecond),
+		strings.ToLower(cometBase) + SelSymbol:                                           abiString("cUSDCv3"),
+		strings.ToLower(cometBase) + SelBaseToken:                                        "0x" + addrWord(usdcBase),
+		strings.ToLower(cometBase) + SelDecimals:                                         "0x" + wordN(6),
+		strings.ToLower(cometBase) + SelTotalSupply:                                      "0x" + wordN(1_000_000_000_000),
+		strings.ToLower(cometBase) + SelGetUtilization:                                   "0x" + word(util),
+		strings.ToLower(cometBase) + strings.ToLower(UintArg(SelGetSupplyRate, util)):    "0x" + wordN(perSecond),
+		strings.ToLower(usdcBase) + strings.ToLower(AddressArg(SelBalanceOf, cometBase)): "0x" + wordN(95_000_000_000),
 	}
 }
 

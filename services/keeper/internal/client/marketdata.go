@@ -20,6 +20,8 @@ type Venue struct {
 	APYBase      float64   `json:"apy_base"`
 	APYReward    float64   `json:"apy_reward"`
 	APYIntrinsic float64   `json:"apy_intrinsic"`
+	LiquidityUsd float64   `json:"liquidity_usd"`
+	NotRoutable  string    `json:"not_routable"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 

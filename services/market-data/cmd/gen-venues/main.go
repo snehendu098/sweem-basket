@@ -100,7 +100,9 @@ func main() {
 				"encodable: protocol maps to a VenueKind the executor implements",
 				"priceable: underlying has a verified Chainlink feed on that chain",
 				"liquid: clears the TVL floor",
+				"withdrawable: clears the MIN_LIQUIDITY_USD floor on measured, live withdrawable liquidity",
 				"verified: symbol/decimals plus a protocol identity check, on chain",
+				"familied: a human has decided the asset's substitution family (or that it has none)",
 				"id equals venue.MakeID(chain, project, pool)",
 			},
 		},
@@ -147,8 +149,8 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 		fmt.Fprintf(os.Stderr, "WARN  %s: no direct rate source: %v\n", c.Label, err)
 	}
 
-	fmt.Fprintf(os.Stderr, "\n%s: min_tvl_usd=%.0f max_apy=%.0f allow_zero_apy=%v\n",
-		c.Label, filter.MinTVLUsd, filter.MaxAPY, filter.AllowZeroAPY)
+	fmt.Fprintf(os.Stderr, "\n%s: min_tvl_usd=%.0f min_liquidity_usd=%.0f max_apy=%.0f allow_zero_apy=%v\n",
+		c.Label, filter.MinTVLUsd, filter.MinLiquidityUsd, filter.MaxAPY, filter.AllowZeroAPY)
 	indexed, err := src.Fetch(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -180,6 +182,10 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 		skipped []skip
 	)
 	for _, v := range candidates {
+		if !v.Routable() {
+			skipped = append(skipped, skip{v.ID, c.Label, v.NotRoutable})
+			continue
+		}
 		kind, ok := kinds[v.Project]
 		if !ok {
 			skipped = append(skipped, skip{v.ID, c.Label, "no VenueKind encodes " + v.Project})
@@ -197,6 +203,10 @@ func forChain(ctx context.Context, c source.Chain, minTVLOverride float64) ([]en
 		if err != nil {
 			skipped = append(skipped, skip{v.ID, c.Label, err.Error()})
 			continue
+		}
+		if _, decided := source.FamilyOfAddress(e.Asset); !decided {
+			return nil, nil, fmt.Errorf("%s: no asset family decided for %s (%s); add it to assetFamilies in internal/source/assets.go before it can be routed",
+				e.ID, e.Symbol, e.Asset)
 		}
 		out = append(out, e)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/snehendu098/sweem-basket/internal/shared/chains"
+	"github.com/snehendu098/sweem-basket/services/market-data/internal/source"
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
@@ -182,12 +183,29 @@ func (s *Store) Count(ctx context.Context) (map[string]int, error) {
 }
 
 type AssetSummary struct {
-	Asset       string  `json:"asset"`
-	Chain       string  `json:"chain"`
-	Venues      int     `json:"venues"`
-	BestAPY     float64 `json:"best_apy"`
-	BestVenue   string  `json:"best_venue"`
-	TotalTVLUsd float64 `json:"total_tvl_usd"`
+	Asset  string `json:"asset"`
+	Chain  string `json:"chain"`
+	Family string `json:"family"`
+	// 0 means measured and there is no yield here; an asset missing from the
+	// response means nobody knows, which is not the same claim.
+	Venues           int     `json:"venues"`
+	BestAPY          float64 `json:"best_apy"`
+	BestAPYBase      float64 `json:"best_apy_base"`
+	BestAPYReward    float64 `json:"best_apy_reward"`
+	BestAPYIntrinsic float64 `json:"best_apy_intrinsic"`
+	BestVenue        string  `json:"best_venue"`
+	TotalTVLUsd      float64 `json:"total_tvl_usd"`
+	Routable         int     `json:"routable_venues"`
+}
+
+type FamilySummary struct {
+	Family      string   `json:"family"`
+	Chain       string   `json:"chain"`
+	Instruments []string `json:"instruments"`
+	BestAsset   string   `json:"best_asset"`
+	BestAPY     float64  `json:"best_apy"`
+	BestVenue   string   `json:"best_venue"`
+	Venues      int      `json:"venues"`
 }
 
 func (s *Store) Assets(ctx context.Context, chain string) ([]AssetSummary, error) {
@@ -196,25 +214,97 @@ func (s *Store) Assets(ctx context.Context, chain string) ([]AssetSummary, error
 		return nil, err
 	}
 	byAsset := map[string]*AssetSummary{}
-	for _, v := range venues {
-		k := v.Chain + ":" + v.Asset
+	summary := func(chain, asset string) *AssetSummary {
+		k := chain + ":" + asset
 		a, ok := byAsset[k]
 		if !ok {
-			a = &AssetSummary{Asset: v.Asset, Chain: v.Chain}
+			fam, _ := source.FamilyOf(asset)
+			a = &AssetSummary{Asset: asset, Chain: chain, Family: fam}
 			byAsset[k] = a
 		}
+		return a
+	}
+	for _, v := range venues {
+		a := summary(v.Chain, v.Asset)
 		a.Venues++
 		a.TotalTVLUsd += v.TVLUsd
+		if !v.Routable() {
+			continue
+		}
+		a.Routable++
 		if v.APY > a.BestAPY {
 			a.BestAPY, a.BestVenue = v.APY, v.ID
+			a.BestAPYBase, a.BestAPYReward, a.BestAPYIntrinsic = v.APYBase, v.APYReward, v.APYIntrinsic
 		}
 	}
+	for _, label := range chainLabels(chain) {
+		id, ok := chains.ID(label)
+		if !ok {
+			continue
+		}
+		for _, asset := range source.HoldableAssets(id) {
+			summary(label, asset)
+		}
+	}
+
 	out := make([]AssetSummary, 0, len(byAsset))
 	for _, a := range byAsset {
 		out = append(out, *a)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].BestAPY > out[j].BestAPY })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].BestAPY != out[j].BestAPY {
+			return out[i].BestAPY > out[j].BestAPY
+		}
+		return out[i].Asset < out[j].Asset
+	})
 	return out, nil
+}
+
+// Families rank on best routable APY only. Acquisition cost belongs here too
+// (weETH out-yields wstETH by 5bp and costs 5.4bp more to enter) but price
+// impact lives in executor/swaps.json, which market-data cannot read.
+func Families(assets []AssetSummary) []FamilySummary {
+	byFamily := map[string]*FamilySummary{}
+	for _, a := range assets {
+		if a.Family == source.FamilyNone {
+			continue
+		}
+		k := a.Chain + ":" + a.Family
+		f, ok := byFamily[k]
+		if !ok {
+			f = &FamilySummary{Family: a.Family, Chain: a.Chain}
+			byFamily[k] = f
+		}
+		f.Instruments = append(f.Instruments, a.Asset)
+		f.Venues += a.Routable
+		if a.BestVenue != "" && (f.BestVenue == "" || a.BestAPY > f.BestAPY) {
+			f.BestAsset, f.BestAPY, f.BestVenue = a.Asset, a.BestAPY, a.BestVenue
+		}
+	}
+	out := make([]FamilySummary, 0, len(byFamily))
+	for _, f := range byFamily {
+		sort.Strings(f.Instruments)
+		out = append(out, *f)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Chain != out[j].Chain {
+			return out[i].Chain < out[j].Chain
+		}
+		return out[i].Family < out[j].Family
+	})
+	return out
+}
+
+func chainLabels(chain string) []string {
+	if chain != "" {
+		return []string{chain}
+	}
+	out := make([]string, 0, 2)
+	for _, id := range chains.Supported() {
+		label, _ := chains.Label(id)
+		out = append(out, label)
+	}
+	return out
 }
 
 const KeySources = "venues:sources"

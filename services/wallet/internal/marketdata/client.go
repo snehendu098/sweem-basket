@@ -26,6 +26,11 @@ type Venue struct {
 	APYIntrinsic float64   `json:"apy_intrinsic"`
 	Stablecoin   bool      `json:"stablecoin"`
 	UpdatedAt    time.Time `json:"updated_at"`
+
+	LiquidityUsd   float64 `json:"liquidity_usd"`
+	LiquidityKnown bool    `json:"liquidity_known"`
+	CollateralOnly bool    `json:"collateral_only"`
+	NotRoutable    string  `json:"not_routable"`
 }
 
 type Client struct {

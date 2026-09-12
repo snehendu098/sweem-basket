@@ -337,3 +337,22 @@ func (p perChainCost) CostUSD(_ context.Context, chainID int) (float64, error) {
 	}
 	return usd, nil
 }
+
+// The keeper ranks on APY, so a 100%-utilised market is the venue it most
+// wants to move into. It must not be a candidate at all.
+func TestRankSkipsUnroutableVenues(t *testing.T) {
+	e := &Engine{}
+	best, current, found := e.rank([]client.Venue{
+		{ID: "base:moonwell:0xaa", APYBase: 15.65, NotRoutable: "withdrawable liquidity $0.00 is below the $1000 floor"},
+		{ID: "base:aave-v3:0xbb", APYBase: 4.2},
+	}, store.Position{VenueID: "base:aave-v3:0xbb", EntryAPY: 4.2}, 0)
+	if !found {
+		t.Fatal("no venue found")
+	}
+	if best.ID != "base:aave-v3:0xbb" {
+		t.Fatalf("keeper would move funds into %s, which cannot be withdrawn from", best.ID)
+	}
+	if current != 4.2 {
+		t.Fatalf("current APY = %v, want 4.2", current)
+	}
+}

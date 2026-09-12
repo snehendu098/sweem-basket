@@ -5,14 +5,25 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   QUOTE_ASSET,
+  assetGroups,
+  assetName,
+  assetWarning,
+  blendApy,
   displayAsset,
+  displayProject,
   evenSplit,
   fmtPct,
   fmtUsd,
-  isSwappable,
+  groupOf,
   marketAssets,
+  marketVenues,
+  reachableAssets,
+  reachableVenues,
+  remapSelection,
   swapPaths,
   swappableAssets,
+  venueWarning,
+  venuesById,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
@@ -21,11 +32,10 @@ import {
   Divider,
   ErrorBox,
   Label,
-  MultiPicker,
   Panel,
   Spinner,
-  Tooltip,
 } from "@/components/ui";
+import { TokenPicker, type PickOption } from "@/components/TokenPicker";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { CountUp, Reveal } from "@/components/motion";
@@ -38,6 +48,9 @@ import {
 } from "@/lib/types";
 
 type Phase = "idle" | "creating" | "funding" | "funded";
+type Mode = "simple" | "advanced";
+
+type Choice = PickOption & { venueId?: string; family?: boolean };
 
 export default function Create() {
   const { ready, authenticated, wallet, me, login, createWallet, delegate, api } =
@@ -47,6 +60,8 @@ export default function Create() {
 
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [mode, setMode] = useState<Mode>("simple");
+  const [dropped, setDropped] = useState<string[]>([]);
   const [amount, setAmount] = useState("1000");
   const [phase, setPhase] = useState<Phase>("idle");
   const [created, setCreated] = useState<Basket | null>(null);
@@ -54,11 +69,16 @@ export default function Create() {
   const { notify, detail, clear } = useSettleToast();
 
   const assets = useAsync(`assets:${chain.label}`, () => marketAssets());
-  const list = assets.data?.assets ?? [];
   const swaps = useAsync(`swap-paths:${chain.label}`, swapPaths);
   const swappable = swaps.data
     ? swappableAssets(swaps.data, chain.chainId)
     : null;
+  // Advanced only: the summary now carries the split rate, so warnings need no join.
+  const venues = useAsync(`venues:${chain.label}:${mode}`, () =>
+    mode === "advanced" ? marketVenues() : Promise.resolve(null),
+  );
+  const byVenue = venues.data ? venuesById(venues.data.venues) : null;
+  const list = reachableAssets(assets.data?.assets ?? [], swappable);
   const portfolio = useApi<Portfolio>("/v1/portfolio");
   const balance = (portfolio.data?.onchain?.balances ?? []).find(
     (b) => b.symbol === QUOTE_ASSET,
@@ -72,17 +92,97 @@ export default function Create() {
       : null,
   );
 
-  const blocked = (asset: string) => !isSwappable(asset, swappable);
-  const noRoute = `no USDC swap route on ${chain.name} — this token cannot be bought with your deposit here`;
-  const many = list.length > 5;
+  const groups = assetGroups(list, assets.data?.families);
 
-  const chosen = picked.filter((a) => !blocked(a));
-  const split = evenSplit(chosen);
-  const pct = evenSplit(chosen, 100);
-  const apy = split.reduce((s, w) => {
-    const m = list.find((x) => x.asset === w.asset);
-    return s + ((m?.best_apy ?? 0) * w.weight_bps) / TOTAL_BPS;
-  }, 0);
+  const simple: Choice[] = groups.map((g) => {
+    const a = g.best;
+    const sym = g.family ? g.id : displayAsset(a.asset);
+    return {
+      id: g.id,
+      asset: a.asset,
+      family: g.family,
+      symbol: sym,
+      title: assetName(sym),
+      sub: g.family ? `${sym} · via ${displayAsset(a.asset)}` : displayAsset(a.asset),
+      apy: a.best_apy,
+      tvl: g.members.reduce((t, m) => t + m.total_tvl_usd, 0),
+      disabled: false,
+      reason: "",
+      warning: assetWarning(a) ?? undefined,
+    };
+  });
+
+  const taken = new Map<string, string>();
+  if (mode === "advanced") {
+    for (const id of picked) {
+      const v = byVenue?.get(id);
+      if (v && !taken.has(v.asset)) taken.set(v.asset, id);
+    }
+  }
+  const advanced: Choice[] = reachableVenues(venues.data?.venues ?? [], swappable)
+    .sort(
+      (a, b) =>
+        displayProject(a.project).localeCompare(displayProject(b.project)) ||
+        b.apy - a.apy ||
+        a.id.localeCompare(b.id),
+    )
+    .map((v) => {
+      const clash = taken.get(v.asset);
+      return {
+        id: v.id,
+        asset: v.asset,
+        symbol: displayAsset(v.asset),
+        title: assetName(v.asset),
+        sub: `${displayProject(v.project)} · ${v.symbol}`,
+        apy: v.apy,
+        tvl: v.tvl_usd,
+        group: displayProject(v.project),
+        venueId: v.id,
+        disabled: clash !== undefined && clash !== v.id,
+        reason: `${displayAsset(v.asset)} is already held by another venue in this basket`,
+        warning: venueWarning(v) ?? undefined,
+      };
+    });
+
+  const options = mode === "simple" ? simple : advanced;
+  const tiles = [...options]
+    .filter((o) => !o.disabled)
+    .sort((a, b) => b.tvl - a.tvl)
+    .slice(0, 5);
+  const labelOf = (id: string) => {
+    const o = options.find((x) => x.id === id);
+    if (o) return `${o.symbol} (${o.sub})`;
+    const v = byVenue?.get(id);
+    return v ? `${displayAsset(v.asset)} (${displayProject(v.project)})` : id;
+  };
+
+  const chosen = options.filter((o) => picked.includes(o.id) && !o.disabled);
+  const settling = mode === "advanced" ? venues.loading : assets.loading;
+  const orphans = settling
+    ? []
+    : picked.filter((id) => !options.some((o) => o.id === id));
+  const split = evenSplit(chosen.map((o) => o.asset)).map((w, i) =>
+    chosen[i].venueId ? { ...w, venue_id: chosen[i].venueId } : w,
+  );
+  const pct = evenSplit(chosen.map((o) => o.asset), 100);
+  const apy = blendApy(
+    split,
+    chosen.map((o) => ({ asset: o.asset, best_apy: o.apy })),
+  );
+
+  // Venue rows may still be loading, so a mapped id is verified against the
+  // rendered options below rather than here.
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    const toId =
+      next === "advanced"
+        ? (id: string) => groups.find((x) => x.id === id)?.best.best_venue ?? null
+        : (id: string) => groupOf(byVenue?.get(id)?.asset ?? "", groups)?.id ?? null;
+    const res = remapSelection(picked, toId);
+    setDropped(res.dropped.map(labelOf));
+    setPicked(res.kept);
+    setMode(next);
+  }
 
   const busy = phase === "creating" || phase === "funding";
   const canSubmit = name.trim() !== "" && chosen.length > 0 && amountValid;
@@ -100,8 +200,10 @@ export default function Create() {
             ? "delegate"
             : "ready";
 
-  const toggle = (asset: string) =>
-    setPicked((p) => (p.includes(asset) ? p.filter((a) => a !== asset) : [...p, asset]));
+  const toggle = (id: string) => {
+    setDropped([]);
+    setPicked((p) => (p.includes(id) ? p.filter((a) => a !== id) : [...p, id]));
+  };
 
   function reset() {
     setCreated(null);
@@ -178,14 +280,18 @@ export default function Create() {
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Blended APY</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight text-positive">
-              <CountUp value={apy} format={(n) => fmtPct(n)} />
+              {apy === null ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
+                <CountUp value={apy} format={(n) => fmtPct(n)} />
+              )}
             </div>
           </div>
           <div className="w-px self-stretch bg-border" />
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Rewards / year</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight">
-              {amountValid && chosen.length > 0 ? fmtUsd((parsed * apy) / 100) : "—"}
+              {amountValid && apy !== null ? fmtUsd((parsed * apy) / 100) : "—"}
             </div>
           </div>
         </div>
@@ -206,7 +312,24 @@ export default function Create() {
           <Divider />
 
           <div className="p-5">
-            <Label>Tokens</Label>
+            <div className="flex items-center justify-between">
+              <Label>Tokens</Label>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={mode === "advanced"}
+                disabled={locked}
+                onClick={() => switchMode(mode === "simple" ? "advanced" : "simple")}
+                className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+              >
+                Advanced
+                <span
+                  className={`ml-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                    mode === "advanced" ? "bg-foreground" : "bg-border"
+                  }`}
+                />
+              </button>
+            </div>
             {assets.loading ? (
               <div className="mt-4">
                 <Spinner label="Loading tokens…" />
@@ -215,71 +338,46 @@ export default function Create() {
               <div className="mt-4">
                 <ErrorBox message={assets.error} />
               </div>
-            ) : list.length === 0 ? (
+            ) : options.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">
-                No tokens indexed on {chain.name} yet.
+                {mode === "advanced"
+                  ? venues.error ?? `No venues indexed on ${chain.name} yet.`
+                  : `No tokens indexed on ${chain.name} yet.`}
               </p>
             ) : (
-              <div className="mt-4">
-                {many ? (
-                  <MultiPicker
-                    ariaLabel="Basket tokens"
-                    values={picked}
-                    onToggle={toggle}
-                    disabled={locked}
-                    options={list.map((a) => ({
-                      value: a.asset,
-                      label: displayAsset(a.asset),
-                      hint: fmtPct(a.best_apy),
-                      icon: <TokenIcon symbol={a.asset} size={18} />,
-                      disabled: blocked(a.asset),
-                      reason: noRoute,
-                    }))}
-                  />
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {list.map((a) => {
-                      const on = picked.includes(a.asset);
-                      const off = blocked(a.asset);
-                      const chip = (
-                        <button
-                          type="button"
-                          onClick={() => !off && !locked && toggle(a.asset)}
-                          aria-pressed={on}
-                          aria-disabled={off || locked}
-                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors ${
-                            off
-                              ? "cursor-not-allowed border-border opacity-40"
-                              : on
-                                ? "border-foreground bg-secondary"
-                                : "border-border hover:bg-secondary/50"
-                          }`}
-                        >
-                          <TokenIcon symbol={a.asset} size={20} />
-                          <span className="font-medium">{displayAsset(a.asset)}</span>
-                          <span className="tnum text-xs text-positive">
-                            {fmtPct(a.best_apy)}
-                          </span>
-                        </button>
-                      );
-                      return off ? (
-                        <Tooltip key={a.asset} label={noRoute}>
-                          {chip}
-                        </Tooltip>
-                      ) : (
-                        <span key={a.asset}>{chip}</span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <Reveal key={mode} className="mt-4" y={4}>
+                <TokenPicker
+                  heading={mode === "simple" ? "Select tokens" : "Select venues"}
+                  placeholder={mode === "simple" ? "Select tokens" : "Select venues"}
+                  options={options}
+                  tiles={tiles}
+                  values={picked}
+                  onToggle={toggle}
+                  disabled={locked}
+                />
+              </Reveal>
+            )}
+
+            {chosen.some((o) => o.family) && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                the instrument shown is fixed at deposit and not re-picked afterwards
+              </p>
+            )}
+
+            {(dropped.length > 0 || orphans.length > 0) && (
+              <p className="mt-3 text-xs text-warning">
+                not carried over to {mode} mode:{" "}
+                {[...dropped, ...orphans.map(labelOf)].join(", ")} — no reachable{" "}
+                {mode === "simple" ? "family" : "venue"} matches, reselect if you want
+                them
+              </p>
             )}
 
             {swaps.error && (
               <p className="mt-3 text-xs text-warning">
-                could not read the swap allowlist ({swaps.error}) — every token is
-                left selectable, so a missing route will surface at deposit
-                instead of here
+                could not read the swap allowlist ({swaps.error}) — nothing is
+                hidden, so a token with no route will surface at deposit instead
+                of here
               </p>
             )}
 

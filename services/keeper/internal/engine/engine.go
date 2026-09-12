@@ -291,6 +291,9 @@ func (e *Engine) rank(list []client.Venue, p store.Position, discount float64) (
 		if v.ID == p.VenueID {
 			currentAPY = eff
 		}
+		if v.NotRoutable != "" {
+			continue
+		}
 		if !found || eff > best.APY {
 			best, found = v, true
 			best.APY = eff

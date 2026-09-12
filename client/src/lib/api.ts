@@ -2,6 +2,8 @@ import {
   TOTAL_BPS,
   type AssetSummary,
   type BasketSummary,
+  type Family,
+  type Venue,
   type Weight,
 } from "./types";
 
@@ -176,13 +178,115 @@ export const publicBasket = (id: string) =>
   envelope<BasketSummary>(`${WALLET_URL}/public/baskets/${encodeURIComponent(id)}`);
 
 export const marketAssets = (chain = activeChain().label) =>
-  envelope<{ assets: AssetSummary[] | null; count: number }>(
+  envelope<{ assets: AssetSummary[] | null; families: Family[] | null; count: number }>(
     `${MARKET_URL}/assets?chain=${encodeURIComponent(chain)}`,
   );
 
+export const marketVenues = (chain = activeChain().label) =>
+  envelope<{ venues: Venue[] | null; count: number }>(
+    `${MARKET_URL}/venues?chain=${encodeURIComponent(chain)}&limit=500`,
+  );
+
+export const venuesById = (venues: Venue[] | null | undefined) =>
+  new Map((venues ?? []).map((v) => [v.id, v]));
+
+export const NO_YIELD_WARNING = "no yield venue: bought and held, earns nothing";
+export const UNKNOWN_YIELD_WARNING = "no rate published for this token: yield unknown";
+export const EMISSIONS_WARNING = "rate includes token emissions, which can stop";
+
+// A source that folds emissions into apy_base reports apy_reward = 0.
+export const EMISSIONS_APY = 10;
+
+const emissions = (base: number, reward: number): string | null =>
+  reward === 0 && base >= EMISSIONS_APY ? EMISSIONS_WARNING : null;
+
+// routable_venues, not venues: an illiquid market is TVL nobody can withdraw.
+export function assetWarning(asset: AssetSummary | null | undefined): string | null {
+  if (!asset) return UNKNOWN_YIELD_WARNING;
+  if ((asset.routable_venues ?? asset.venues) === 0 || asset.best_apy === 0) {
+    return NO_YIELD_WARNING;
+  }
+  return asset.best_apy_base !== undefined && asset.best_apy_reward !== undefined
+    ? emissions(asset.best_apy_base, asset.best_apy_reward)
+    : null;
+}
+
+export function venueWarning(v: Venue): string | null {
+  return v.apy === 0 ? NO_YIELD_WARNING : emissions(v.apy_base, v.apy_reward);
+}
+
+// Unknown paths keep everything: a failed fetch must not empty the picker.
+export const reachableAssets = (
+  assets: readonly AssetSummary[],
+  targets: ReadonlySet<string> | null,
+): AssetSummary[] => assets.filter((a) => isSwappable(a.asset, targets));
+
+export const reachableVenues = (
+  venues: readonly Venue[],
+  targets: ReadonlySet<string> | null,
+): Venue[] =>
+  venues.filter((v) => !v.not_routable && isSwappable(v.asset, targets));
+
+export type AssetGroup = {
+  id: string;
+  family: boolean;
+  members: AssetSummary[];
+  best: AssetSummary;
+};
+
+// Membership is each asset's own family field; the families array only says
+// which keys are families. No family anywhere collapses this to a flat list.
+export function assetGroups(
+  assets: readonly AssetSummary[],
+  families: readonly Family[] | null | undefined,
+): AssetGroup[] {
+  const named = new Set((families ?? []).map((f) => f.family));
+  const by = new Map<string, AssetSummary[]>();
+  for (const a of assets) {
+    const k = a.family || a.asset;
+    const cur = by.get(k);
+    if (cur) cur.push(a);
+    else by.set(k, [a]);
+  }
+  const out: AssetGroup[] = [];
+  for (const [id, members] of by) {
+    members.sort((x, y) => y.best_apy - x.best_apy || x.asset.localeCompare(y.asset));
+    out.push({
+      id,
+      family: named.size > 0 ? named.has(id) : id !== members[0].asset,
+      members,
+      best: members[0],
+    });
+  }
+  return out.sort(
+    (a, b) => b.best.best_apy - a.best.best_apy || a.id.localeCompare(b.id),
+  );
+}
+
+export const groupOf = (
+  asset: string,
+  groups: readonly AssetGroup[],
+): AssetGroup | undefined => groups.find((g) => g.members.some((m) => m.asset === asset));
+
+export function remapSelection(
+  ids: readonly string[],
+  to: (id: string) => string | null,
+): { kept: string[]; dropped: string[] } {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const id of ids) {
+    const next = to(id);
+    if (next === null) dropped.push(id);
+    else if (!kept.includes(next)) kept.push(next);
+  }
+  return { kept, dropped };
+}
+
+export type Rate = Pick<AssetSummary, "asset" | "best_apy">;
+
 export function blendApy(
   weights: Weight[] | null | undefined,
-  assets: AssetSummary[] | null | undefined,
+  assets: readonly Rate[] | null | undefined,
 ): number | null {
   if (!weights || weights.length === 0 || !assets) return null;
   let apy = 0;
@@ -261,6 +365,43 @@ export function isSwappable(
 }
 
 export const displayAsset = (symbol: string) => DISPLAY_ASSET[symbol] ?? symbol;
+
+const ASSET_NAME: Record<string, string> = {
+  ETH: "Ether",
+  WETH: "Wrapped Ether",
+  wstETH: "Lido wrapped staked ETH",
+  cbETH: "Coinbase wrapped staked ETH",
+  weETH: "ether.fi wrapped staked ETH",
+  rETH: "Rocket Pool ETH",
+  wrsETH: "Kelp wrapped restaked ETH",
+  ezETH: "Renzo restaked ETH",
+  cbBTC: "Coinbase wrapped BTC",
+  WBTC: "Wrapped BTC",
+  tBTC: "Threshold BTC",
+  LBTC: "Lombard staked BTC",
+  USDC: "USD Coin",
+  USDbC: "USD base coin",
+  USDS: "Sky USDS",
+  sUSDS: "Sky savings USDS",
+  USDT: "Tether USD",
+  USDe: "Ethena USDe",
+  DAI: "Dai stablecoin",
+  GHO: "Aave GHO",
+  syrupUSDC: "Maple syrupUSDC",
+  EURC: "Euro Coin",
+  AERO: "Aerodrome",
+  LINK: "Chainlink",
+  AAVE: "Aave",
+  MORPHO: "Morpho",
+  VIRTUAL: "Virtuals Protocol",
+  VVV: "Venice Token",
+  BTC: "Bitcoin",
+  USD: "US dollar",
+  EUR: "Euro",
+};
+
+export const assetName = (symbol: string) =>
+  ASSET_NAME[symbol] ?? ASSET_NAME[displayAsset(symbol)] ?? displayAsset(symbol);
 
 const DISPLAY_PROJECT: Record<string, string> = {
   "aave-v3": "Aave v3",

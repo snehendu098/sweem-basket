@@ -91,3 +91,42 @@ func TestNoBtcWrapperResolvesToPlainBtc(t *testing.T) {
 		}
 	}
 }
+
+// Any asset ResolveAsset can name must have a family decision on file, or
+// gen-venues fails on it the first time it shows up in a market.
+func TestEveryKnownTokenHasAFamilyDecision(t *testing.T) {
+	for addr, sym := range tokenAddresses {
+		if _, decided := FamilyOfAddress(addr); !decided {
+			t.Errorf("%s (%s) has no assetFamilies entry", sym, addr)
+		}
+	}
+}
+
+// The families are a substitution claim, not a price-feed quote currency.
+// ezETH and wrsETH quote against ETH and carry slashing risk ETH does not.
+func TestFamiliesAreSubstitutionNotQuoteCurrency(t *testing.T) {
+	for _, sym := range []string{"WETH", "wstETH", "cbETH", "weETH", "rETH", "wrsETH"} {
+		if f, _ := FamilyOf(sym); f != "ETH" {
+			t.Errorf("FamilyOf(%s) = %q, want ETH", sym, f)
+		}
+	}
+	for _, sym := range []string{"cbBTC", "WBTC"} {
+		if f, _ := FamilyOf(sym); f != "BTC" {
+			t.Errorf("FamilyOf(%s) = %q, want BTC", sym, f)
+		}
+	}
+	for _, sym := range []string{"USDC", "USDbC", "USDS", "GHO", "DAI", "USDT"} {
+		if f, _ := FamilyOf(sym); f != "USD" {
+			t.Errorf("FamilyOf(%s) = %q, want USD", sym, f)
+		}
+	}
+	if f, _ := FamilyOf("EURC"); f != "EUR" {
+		t.Errorf("EURC is not USD: got %q", f)
+	}
+	for _, sym := range []string{"ezETH", "tBTC", "LBTC", "AERO", "sUSDS", "syrupUSDC"} {
+		f, decided := FamilyOf(sym)
+		if !decided || f != FamilyNone {
+			t.Errorf("FamilyOf(%s) = %q decided=%v, want a decided singleton", sym, f, decided)
+		}
+	}
+}

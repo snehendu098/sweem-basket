@@ -28,6 +28,7 @@ func (m *Moonwell) Query() string {
     name
     isActive
     totalDepositBalanceUSD
+    totalBorrowBalanceUSD
     inputToken { id symbol decimals }
     rates { side type rate }
   }
@@ -40,6 +41,7 @@ type moonwellMarkets struct {
 		Name                   string `json:"name"`
 		IsActive               bool   `json:"isActive"`
 		TotalDepositBalanceUSD string `json:"totalDepositBalanceUSD"`
+		TotalBorrowBalanceUSD  string `json:"totalBorrowBalanceUSD"`
 		InputToken             struct {
 			ID     string `json:"id"`
 			Symbol string `json:"symbol"`
@@ -74,17 +76,21 @@ func (m *Moonwell) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 		}
 		asset := ResolveAsset([]string{mk.InputToken.ID}, mk.InputToken.Symbol)
 		out = append(out, venue.Venue{
-			ID:         venue.MakeID(m.Chain, m.Protocol(), mk.ID),
-			Chain:      m.Chain,
-			Project:    m.Protocol(),
-			Symbol:     mk.InputToken.Symbol,
-			PoolID:     mk.ID,
-			Asset:      asset,
-			TVLUsd:     tvl,
-			APY:        apy,
-			APYBase:    apy,
-			Stablecoin: isStable(asset),
-			UpdatedAt:  now,
+			// Deposits minus borrows is a lower bound on getCash(): the cToken
+			// also holds its reserves, so this never overstates the exit.
+			LiquidityUsd:   max(0, tvl-parseDecimal(mk.TotalBorrowBalanceUSD)),
+			LiquidityKnown: true,
+			ID:             venue.MakeID(m.Chain, m.Protocol(), mk.ID),
+			Chain:          m.Chain,
+			Project:        m.Protocol(),
+			Symbol:         mk.InputToken.Symbol,
+			PoolID:         mk.ID,
+			Asset:          asset,
+			TVLUsd:         tvl,
+			APY:            apy,
+			APYBase:        apy,
+			Stablecoin:     isStable(asset),
+			UpdatedAt:      now,
 		})
 	}
 	return out, nil

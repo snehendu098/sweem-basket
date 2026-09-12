@@ -106,8 +106,19 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			continue
 		}
 
-		v, note, err := s.bestRoutable(r.Context(), weight.Asset, b.Chain)
+		var (
+			v    marketdata.Venue
+			note string
+			err  error
+		)
+		if weight.VenueID != "" {
+			v, err = s.pinnedRoutable(r.Context(), weight.VenueID, weight.Asset, b.Chain)
+		} else {
+			v, note, err = s.bestRoutable(r.Context(), weight.Asset, b.Chain)
+		}
 		switch {
+		case errors.Is(err, ErrPinUnusable):
+			leg.Reason = err.Error() + "; this leg was not routed elsewhere"
 		case errors.Is(err, marketdata.ErrNoVenue):
 			leg.Reason = "no venue meets the liquidity floor; funds stay idle"
 		case errors.Is(err, ErrNoRoutableVenue):
@@ -118,6 +129,9 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 		default:
 			leg.Venue = &v
 			leg.Reason = "highest net APY above the TVL floor"
+			if weight.VenueID != "" {
+				leg.Reason = "pinned to " + weight.VenueID
+			}
 			if note != "" {
 				leg.Reason = note
 			}
@@ -512,8 +526,14 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 
 	results := make([]LegResult, 0, len(positions))
 	failed, pending, moved := 0, 0, 0
+	pins := s.pinsFor(r, positions)
 	for _, p := range positions {
 		res := LegResult{Asset: p.Asset, AmountUSD: p.AmountUSD, FromVenueID: p.VenueID}
+		if pin, ok := pins[p.BasketID+":"+p.Asset]; ok && pin == p.VenueID {
+			res.Status, res.Reason, res.VenueID = legSkipped, "pinned to "+pin, pin
+			results = append(results, res)
+			continue
+		}
 		best, note, err := s.bestRoutable(r.Context(), p.Asset, p.Chain)
 		if err != nil {
 			res.Status, res.Reason = legSkipped, "no better executable venue available"
@@ -610,3 +630,25 @@ func settledStatus(failed, pending int) int {
 }
 
 func shouldRebalance(drift, threshold float64) bool { return drift > threshold }
+
+func (s *Server) pinsFor(r *http.Request, positions []store.Position) map[string]string {
+	out := map[string]string{}
+	seen := map[string]bool{}
+	for _, p := range positions {
+		if seen[p.BasketID] {
+			continue
+		}
+		seen[p.BasketID] = true
+		b, err := s.Store.Basket(r.Context(), p.BasketID)
+		if err != nil {
+			s.Log.Warn("pin lookup", "basket_id", p.BasketID, "err", err)
+			continue
+		}
+		for _, w := range b.Weights {
+			if w.VenueID != "" {
+				out[b.ID+":"+w.Asset] = w.VenueID
+			}
+		}
+	}
+	return out
+}

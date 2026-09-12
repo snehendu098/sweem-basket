@@ -4,6 +4,17 @@ import {
   DEFAULT_CHAIN_ID,
   isSwappable,
   swappableAssets,
+  assetWarning,
+  venuesById,
+  assetGroups,
+  groupOf,
+  reachableAssets,
+  reachableVenues,
+  remapSelection,
+  venueWarning,
+  EMISSIONS_WARNING,
+  NO_YIELD_WARNING,
+  UNKNOWN_YIELD_WARNING,
   activeChain,
   basescanTx,
   blendApy,
@@ -19,7 +30,7 @@ import {
   walletFetch,
 } from "./api";
 import { ownership } from "./types";
-import type { AssetSummary, BasketSummary } from "./types";
+import type { AssetSummary, BasketSummary, Family, Venue } from "./types";
 
 type Stub = { status: number; body: unknown };
 const realFetch = globalThis.fetch;
@@ -74,6 +85,17 @@ async function main() {
       summaries,
     ),
     8,
+  );
+  // 0% is a rate, absent is unknown: a zero leg must dilute, not vanish.
+  assert.equal(
+    blendApy(
+      [
+        { asset: "USDC", weight_bps: 5000 },
+        { asset: "AERO", weight_bps: 5000 },
+      ],
+      [...summaries, { asset: "AERO", best_apy: 0 } as AssetSummary],
+    ),
+    5,
   );
   assert.equal(blendApy([{ asset: "PYUSD", weight_bps: 10000 }], summaries), null);
   assert.equal(blendApy([], summaries), null);
@@ -188,6 +210,119 @@ async function main() {
     ownership(basket({ created_by_me: true, subscribed: true })),
     "created · joined",
   );
+
+  const venue = (x: Partial<Venue>) => ({ apy_reward: 0, ...x }) as Venue;
+  const vmap = venuesById([
+    venue({ id: "base:moonwell:usdc", apy_base: 14.5 }),
+    venue({ id: "base:aave-v3:usdc", apy_base: 4.2 }),
+    venue({ id: "base:hold:wsteth", apy_base: 0 }),
+    venue({ id: "base:morpho:eth", apy_base: 12, apy_reward: 3 }),
+  ]);
+  assert.equal(vmap.size, 4);
+  const sum = (x: Partial<AssetSummary>) => x as AssetSummary;
+  assert.equal(assetWarning(undefined), UNKNOWN_YIELD_WARNING);
+  assert.equal(
+    assetWarning(sum({ venues: 0, routable_venues: 0, best_apy: 0 })),
+    NO_YIELD_WARNING,
+  );
+  // An illiquid market is TVL nobody can withdraw: routable_venues is the count.
+  assert.equal(
+    assetWarning(sum({ venues: 3, routable_venues: 0, best_apy: 0 })),
+    NO_YIELD_WARNING,
+  );
+  assert.equal(
+    assetWarning(
+      sum({ venues: 1, routable_venues: 1, best_apy: 14.5, best_apy_base: 14.5, best_apy_reward: 0 }),
+    ),
+    EMISSIONS_WARNING,
+  );
+  assert.equal(
+    assetWarning(
+      sum({ venues: 1, routable_venues: 1, best_apy: 14.5, best_apy_base: 2, best_apy_reward: 12.5 }),
+    ),
+    null,
+  );
+  assert.equal(
+    assetWarning(sum({ venues: 1, routable_venues: 1, best_apy: 4.2, best_apy_base: 4.2, best_apy_reward: 0 })),
+    null,
+  );
+  // Split rate absent is unknown, not zero emissions.
+  assert.equal(assetWarning(sum({ venues: 1, routable_venues: 1, best_apy: 9 })), null);
+
+  assert.equal(venueWarning(venue({ apy: 0, apy_base: 0 })), NO_YIELD_WARNING);
+  assert.equal(venueWarning(venue({ apy: 14.5, apy_base: 14.5 })), EMISSIONS_WARNING);
+  assert.equal(venueWarning(venue({ apy: 4, apy_base: 4 })), null);
+
+  const paths2 = new Set(["USDC", "cbBTC", "WETH"]);
+  const reach = [
+    sum({ asset: "USDC", family: "USD", best_apy: 5.77, best_venue: "v4" }),
+    sum({ asset: "cbBTC", family: "BTC", best_apy: 2.83, best_venue: "v1" }),
+    sum({ asset: "WBTC", family: "BTC", best_apy: 0, best_venue: "" }),
+    sum({ asset: "tBTC", best_apy: 0.16, best_venue: "v5" }),
+  ];
+  assert.deepEqual(
+    reachableAssets(reach, paths2).map((a) => a.asset),
+    ["USDC", "cbBTC"],
+  );
+  // Unknown paths must not empty the picker.
+  assert.equal(reachableAssets(reach, null).length, 4);
+  assert.deepEqual(
+    reachableVenues(
+      [
+        venue({ id: "a", asset: "USDC" }),
+        venue({ id: "b", asset: "USDC", not_routable: "withdrawable liquidity $0.00" }),
+        venue({ id: "c", asset: "tBTC" }),
+      ],
+      paths2,
+    ).map((v) => v.id),
+    ["a"],
+  );
+  assert.equal(reachableVenues([venue({ id: "b", asset: "USDC", not_routable: "x" })], null).length, 0);
+
+  const fams: Family[] = [
+    { family: "BTC", chain: "base", instruments: ["WBTC", "cbBTC"], best_asset: "cbBTC", best_apy: 2.83, best_venue: "v1", venues: 2 },
+    { family: "USD", chain: "base", instruments: ["USDC"], best_asset: "USDC", best_apy: 5.77, best_venue: "v4", venues: 1 },
+  ];
+  const famAssets = [
+    ...reach.slice(0, 3),
+    sum({ asset: "LINK", best_apy: 0.5, best_venue: "v3" }),
+  ];
+  const gs = assetGroups(famAssets, fams);
+  assert.deepEqual(
+    gs.map((g) => [g.id, g.family, g.best.asset]),
+    [
+      ["USD", true, "USDC"],
+      ["BTC", true, "cbBTC"],
+      ["LINK", false, "LINK"],
+    ],
+  );
+  // Hiding an unreachable instrument moves the family winner, it does not hide the family.
+  const reachable = assetGroups(reachableAssets(famAssets, paths2), fams);
+  assert.deepEqual(
+    reachable.find((g) => g.id === "BTC")?.members.map((m) => m.asset),
+    ["cbBTC"],
+  );
+  // No families array degrades to today's flat instrument list.
+  const flat = assetGroups(
+    famAssets.map((a) => sum({ ...a, family: undefined })),
+    null,
+  );
+  assert.deepEqual(
+    flat.map((g) => [g.id, g.family]),
+    [["USDC", false], ["cbBTC", false], ["LINK", false], ["WBTC", false]],
+  );
+
+  assert.equal(groupOf("WBTC", gs)?.id, "BTC");
+  assert.equal(groupOf("AERO", gs), undefined);
+
+  // Two venues of one family collapse to one row, not a drop.
+  assert.deepEqual(
+    remapSelection(["v1", "v2", "v9"], (id) =>
+      id === "v9" ? null : groupOf(id === "v1" ? "cbBTC" : "WBTC", gs)?.id ?? null,
+    ),
+    { kept: ["BTC"], dropped: ["v9"] },
+  );
+  assert.deepEqual(remapSelection([], () => null), { kept: [], dropped: [] });
 
   assert.equal(sameChain("base", "base"), true);
   assert.equal(sameChain("Base", "base"), true);

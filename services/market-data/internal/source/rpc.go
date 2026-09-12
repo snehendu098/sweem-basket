@@ -127,9 +127,9 @@ func (s *RPCSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 				return
 			}
 			kept := venues[:0]
-			for _, v := range venues {
-				if s.Filter.Accept(v) {
-					kept = append(kept, v)
+			for i := range venues {
+				if s.Filter.Screen(&venues[i]) {
+					kept = append(kept, venues[i])
 				}
 			}
 			st.OK, st.Venues, st.LastSuccess = true, len(kept), st.LastAttempt
@@ -177,10 +177,11 @@ func (s *RPCSource) setStatus(st Status, ok bool) {
 }
 
 const (
-	aaveReserveDataWords = 15
-	wordConfiguration    = 0
-	wordLiquidityRate    = 2
-	wordAToken           = 8
+	aaveReserveDataWords    = 15
+	wordConfiguration       = 0
+	wordLiquidityRate       = 2
+	wordVariableBorrowIndex = 3
+	wordAToken              = 8
 )
 
 const (
@@ -208,7 +209,9 @@ func (s *RPCSource) aave(ctx context.Context, cl *Caller, p *Pricer) ([]venue.Ve
 	supplies := make([]prices.Call, 0, len(list))
 	for _, underlying := range list {
 		if aToken, err := s.aaveAToken(ctx, cl, underlying); err == nil {
-			supplies = append(supplies, prices.Call{To: aToken, Data: SelTotalSupply})
+			supplies = append(supplies,
+				prices.Call{To: aToken, Data: SelTotalSupply},
+				prices.Call{To: underlying, Data: AddressArg(SelBalanceOf, aToken)})
 		}
 	}
 	cl.Prefetch(ctx, supplies)
@@ -245,7 +248,7 @@ func (s *RPCSource) aaveReserve(ctx context.Context, cl *Caller, p *Pricer, unde
 	if err != nil {
 		return venue.Venue{}, err
 	}
-	cfg, rate := ws[wordConfiguration], ws[wordLiquidityRate]
+	cfg, rate, borrowIndex := ws[wordConfiguration], ws[wordLiquidityRate], ws[wordVariableBorrowIndex]
 
 	if rate.BitLen() > 128 {
 		return venue.Venue{}, errors.New("unexpected getReserveData layout")
@@ -279,6 +282,10 @@ func (s *RPCSource) aaveReserve(ctx context.Context, cl *Caller, p *Pricer, unde
 	if err != nil {
 		return venue.Venue{}, fmt.Errorf("aToken %s totalSupply(): %w", aToken, err)
 	}
+	cashRaw, err := cl.Uint(ctx, underlying, AddressArg(SelBalanceOf, aToken))
+	if err != nil {
+		return venue.Venue{}, fmt.Errorf("%s balanceOf(aToken): %w", underlying, err)
+	}
 	price, ok := p.USD(asset)
 	if !ok {
 		return venue.Venue{}, errors.New("unpriceable: " + asset)
@@ -286,17 +293,20 @@ func (s *RPCSource) aaveReserve(ctx context.Context, cl *Caller, p *Pricer, unde
 
 	poolID := strings.ToLower(underlying)
 	return venue.Venue{
-		ID:         venue.MakeID(s.Chain.Label, "aave-v3", poolID),
-		Chain:      s.Chain.Label,
-		Project:    "aave-v3",
-		Symbol:     asset,
-		PoolID:     poolID,
-		Asset:      asset,
-		TVLUsd:     decimalFloat(supplyRaw.String(), decimals) * price,
-		APY:        apy,
-		APYBase:    apy,
-		Stablecoin: isStable(asset),
-		UpdatedAt:  now,
+		LiquidityUsd:   decimalFloat(cashRaw.String(), decimals) * price,
+		LiquidityKnown: true,
+		CollateralOnly: collateralOnly(borrowIndex, rate),
+		ID:             venue.MakeID(s.Chain.Label, "aave-v3", poolID),
+		Chain:          s.Chain.Label,
+		Project:        "aave-v3",
+		Symbol:         asset,
+		PoolID:         poolID,
+		Asset:          asset,
+		TVLUsd:         decimalFloat(supplyRaw.String(), decimals) * price,
+		APY:            apy,
+		APYBase:        apy,
+		Stablecoin:     isStable(asset),
+		UpdatedAt:      now,
 	}, nil
 }
 
@@ -319,10 +329,13 @@ func (s *RPCSource) compound(ctx context.Context, cl *Caller, p *Pricer) ([]venu
 	}
 	cl.Prefetch(ctx, reads)
 
-	rates := make([]prices.Call, 0, len(s.comets))
+	rates := make([]prices.Call, 0, len(s.comets)*2)
 	for _, m := range s.comets {
 		if util, err := cl.Uint(ctx, m.Address, SelGetUtilization); err == nil {
 			rates = append(rates, prices.Call{To: m.Address, Data: UintArg(SelGetSupplyRate, util)})
+		}
+		if base, err := cl.Address(ctx, m.Address, SelBaseToken); err == nil {
+			rates = append(rates, prices.Call{To: base, Data: AddressArg(SelBalanceOf, m.Address)})
 		}
 	}
 	cl.Prefetch(ctx, rates)
@@ -377,6 +390,10 @@ func (s *RPCSource) comet(ctx context.Context, cl *Caller, p *Pricer, m cometMar
 	if err != nil {
 		return venue.Venue{}, fmt.Errorf("totalSupply(): %w", err)
 	}
+	cashRaw, err := cl.Uint(ctx, base, AddressArg(SelBalanceOf, m.Address))
+	if err != nil {
+		return venue.Venue{}, fmt.Errorf("baseToken balanceOf(comet): %w", err)
+	}
 	price, ok := p.USD(asset)
 	if !ok {
 		return venue.Venue{}, errors.New("unpriceable: " + asset)
@@ -384,18 +401,20 @@ func (s *RPCSource) comet(ctx context.Context, cl *Caller, p *Pricer, m cometMar
 
 	poolID := strings.ToLower(m.Address)
 	return venue.Venue{
-		ID:         venue.MakeID(s.Chain.Label, "compound-v3", poolID),
-		Chain:      s.Chain.Label,
-		Project:    "compound-v3",
-		Symbol:     symbol,
-		PoolID:     poolID,
-		Asset:      asset,
-		TVLUsd:     decimalFloat(supplyRaw.String(), decimals) * price,
-		APY:        apy,
-		APYBase:    apy,
-		APYReward:  0,
-		Stablecoin: isStable(asset),
-		UpdatedAt:  now,
+		LiquidityUsd:   decimalFloat(cashRaw.String(), decimals) * price,
+		LiquidityKnown: true,
+		ID:             venue.MakeID(s.Chain.Label, "compound-v3", poolID),
+		Chain:          s.Chain.Label,
+		Project:        "compound-v3",
+		Symbol:         symbol,
+		PoolID:         poolID,
+		Asset:          asset,
+		TVLUsd:         decimalFloat(supplyRaw.String(), decimals) * price,
+		APY:            apy,
+		APYBase:        apy,
+		APYReward:      0,
+		Stablecoin:     isStable(asset),
+		UpdatedAt:      now,
 	}, nil
 }
 
@@ -526,18 +545,21 @@ func (s *RPCSource) holdVenue(ctx context.Context, cl *Caller, p *Pricer, f rate
 	}
 
 	poolID := strings.ToLower(f.Token)
+	tvl := decimalFloat(supplyRaw.String(), decimals) * price
 	return venue.Venue{
-		ID:           venue.MakeID(s.Chain.Label, ProtocolHold, poolID),
-		Chain:        s.Chain.Label,
-		Project:      ProtocolHold,
-		Symbol:       asset,
-		PoolID:       poolID,
-		Asset:        asset,
-		TVLUsd:       decimalFloat(supplyRaw.String(), decimals) * price,
-		APY:          apy,
-		APYIntrinsic: apy,
-		Stablecoin:   isStable(asset),
-		UpdatedAt:    now,
+		LiquidityUsd:   tvl,
+		LiquidityKnown: true,
+		ID:             venue.MakeID(s.Chain.Label, ProtocolHold, poolID),
+		Chain:          s.Chain.Label,
+		Project:        ProtocolHold,
+		Symbol:         asset,
+		PoolID:         poolID,
+		Asset:          asset,
+		TVLUsd:         decimalFloat(supplyRaw.String(), decimals) * price,
+		APY:            apy,
+		APYIntrinsic:   apy,
+		Stablecoin:     isStable(asset),
+		UpdatedAt:      now,
 	}, nil
 }
 
