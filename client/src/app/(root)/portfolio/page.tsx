@@ -2,16 +2,24 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { displayAsset, fmtPct, fmtTime, fmtUsd, fmtUsdOrUnknown } from "@/lib/api";
+import {
+  displayAsset,
+  displayProject,
+  fmtPct,
+  fmtTime,
+  fmtUsd,
+  sameChain,
+} from "@/lib/api";
+import { useChain } from "@/lib/chain";
 import { useApi, useSession } from "@/lib/session";
 import {
   Button,
   Divider,
   ErrorBox,
   Panel,
-  SettleReport,
   Spinner,
 } from "@/components/ui";
+import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { Reveal } from "@/components/motion";
 import {
@@ -24,19 +32,30 @@ import {
 
 export default function PortfolioPage() {
   const { ready, authenticated, login, me, api } = useSession();
+  const chain = useChain();
   const portfolio = useApi<Portfolio>("/v1/portfolio");
   const baskets = useApi<Basket[] | null>("/v1/baskets");
 
   const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    basketId: string;
-    status: number;
-    data: SettleResult;
-  } | null>(null);
+  const { notify, detail, clear } = useSettleToast();
 
   const p = portfolio.data;
-  const positions = p?.positions ?? [];
+  // One account spans both Base networks. A Sepolia position added into a
+  // mainnet total is a testnet dollar pretending to be a real one, so the
+  // selected chain filters the rows — and then the totals are recomputed from
+  // those rows rather than reusing the API's all-chain figures.
+  const all = p?.positions ?? [];
+  const positions = all.filter((h) => sameChain(h.chain, chain.label));
+  const split = positions.length !== all.length;
+  const totalUsd = split
+    ? positions.reduce((s, h) => s + h.amount_usd, 0)
+    : (p?.total_usd ?? 0);
+  const blendedApy =
+    split && totalUsd > 0
+      ? positions.reduce((s, h) => s + (h.current_apy * h.amount_usd) / totalUsd, 0)
+      : split
+        ? 0
+        : (p?.blended_apy ?? 0);
   const idleUsd = positions
     .filter((h) => h.venue_id === IDLE_VENUE_ID)
     .reduce((s, h) => s + h.amount_usd, 0);
@@ -53,8 +72,7 @@ export default function PortfolioPage() {
 
   async function rebalance(basketId: string) {
     setBusy(basketId);
-    setErr(null);
-    setResult(null);
+    clear();
     try {
       // Same route the keeper calls; with a user token it authenticates as the
       // user, and 207 is a normal partial outcome exactly like deposit.
@@ -62,9 +80,21 @@ export default function PortfolioPage() {
         `/v1/baskets/${basketId}/rebalance`,
         { method: "POST" },
       );
-      setResult({ basketId, status: res.status, data: res.data });
+      notify(res.status, res.data, {
+        key: basketId,
+        verb: "Rebalanced",
+        // A rebalance that moved nothing is a success, not an empty report.
+        successTitle:
+          res.data.moved_legs === 0
+            ? `Nothing to move — no position cleared the drift threshold${
+                res.data.threshold_apy !== undefined
+                  ? ` of ${fmtPct(res.data.threshold_apy)}`
+                  : ""
+              }`
+            : undefined,
+      });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      toastError(e);
     } finally {
       setBusy(null);
       portfolio.reload();
@@ -95,14 +125,14 @@ export default function PortfolioPage() {
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Total value</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight">
-              {p ? fmtUsd(p.total_usd) : "—"}
+              {p ? fmtUsd(totalUsd) : "—"}
             </div>
           </div>
           <div className="w-px self-stretch bg-border" />
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Blended APY</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight text-positive">
-              {p ? fmtPct(p.blended_apy) : "—"}
+              {p ? fmtPct(blendedApy) : "—"}
             </div>
           </div>
         </div>
@@ -125,7 +155,10 @@ export default function PortfolioPage() {
         {p && positions.length === 0 && !portfolio.loading && (
           <Panel>
             <div className="flex items-center justify-between p-5 text-sm">
-              <span className="text-muted-foreground">No positions yet.</span>
+              {/* Says which network is empty: the other one may not be. */}
+              <span className="text-muted-foreground">
+                No positions on {chain.name} yet.
+              </span>
               <Link
                 href="/invest"
                 className="text-foreground underline underline-offset-4 hover:no-underline"
@@ -175,18 +208,9 @@ export default function PortfolioPage() {
                 </ul>
               </Panel>
 
-              {result?.basketId === basketId &&
-                (result.data.moved_legs === 0 && result.status === 200 ? (
-                  <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
-                    Nothing to move — no position cleared the drift threshold
-                    {result.data.threshold_apy !== undefined
-                      ? ` of ${fmtPct(result.data.threshold_apy)}`
-                      : ""}
-                    .
-                  </div>
-                ) : (
-                  <SettleReport result={result.data} status={result.status} />
-                ))}
+              {detail?.key === basketId && (
+                <SettleDetail detail={detail} onClose={clear} />
+              )}
             </section>
           );
         })}
@@ -196,8 +220,6 @@ export default function PortfolioPage() {
             Rebalancing needs delegation — grant it from the settings menu.
           </p>
         )}
-
-        {err && <ErrorBox message={err} />}
 
         {p && !p.onchain_available && (
           <p className="text-xs text-muted-foreground">
@@ -222,7 +244,7 @@ function Row({ h }: { h: Holding }) {
           {displayAsset(h.asset)}
         </span>
         <span className="text-xs text-muted-foreground">
-          {idle ? "idle in wallet" : h.project}
+          {idle ? "idle in wallet" : displayProject(h.project)}
         </span>
         <span className="tnum ml-auto">{fmtUsd(h.amount_usd)}</span>
         <span className="tnum w-16 text-right text-sm text-positive">
@@ -232,12 +254,21 @@ function Row({ h }: { h: Holding }) {
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>entry {fmtPct(h.entry_apy)}</span>
-        {/* A value the API could not produce is never turned into a number. */}
-        <span className={h.onchain_usd === null ? "text-warning" : ""}>
-          on-chain {fmtUsdOrUnknown(h.onchain_usd)}
-          {h.onchain_usd === null && h.value_reason ? ` — ${h.value_reason}` : ""}
+        {/* A value the API could not produce is never turned into a number.
+            The em dash stays rather than the cell disappearing: the amount on
+            the line above is our own record, and a silently absent on-chain
+            figure would read as one that agrees. The reason is still on the
+            title, for anyone who wants it. */}
+        <span
+          className="tnum"
+          title={
+            h.onchain_usd === null
+              ? h.value_reason || "no on-chain value for this holding"
+              : undefined
+          }
+        >
+          on-chain {h.onchain_usd === null ? "—" : fmtUsd(h.onchain_usd)}
         </span>
-        {!h.reconciled && <span>not reconciled</span>}
         <span className="ml-auto">{fmtTime(h.updated_at)}</span>
       </div>
 

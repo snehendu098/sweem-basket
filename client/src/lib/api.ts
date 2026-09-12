@@ -31,21 +31,6 @@ export type ChainInfo = {
   rpc: string;
   /** Canonical USDC, used for the direct balance read fallback. */
   usdc: string;
-  /**
-   * Whether the executor has any Uniswap swap path on this chain.
-   *
-   * A deposit is always USDC; every non-USDC leg is acquired by swapping, and
-   * executor/swaps.json only carries chain_id 8453. On a chain with no paths a
-   * non-USDC leg fails at submission with an unlisted-path error, so the chip
-   * is flagged at selection time instead.
-   *
-   * This is a per-chain boolean, not a copy of the path list: no service
-   * exposes the allowlist. The executor loads swaps.json privately and only
-   * routes /health (a count) and /venues (the *venue* allowlist) — there is no
-   * swap-path endpoint for the wallet service to proxy. When one exists, drop
-   * this flag and read it.
-   */
-  swapRoutes: boolean;
 };
 
 export const CHAINS: readonly ChainInfo[] = [
@@ -58,7 +43,6 @@ export const CHAINS: readonly ChainInfo[] = [
     explorer: "https://basescan.org",
     rpc: "https://mainnet.base.org",
     usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    swapRoutes: true,
   },
   {
     id: 84532,
@@ -69,7 +53,6 @@ export const CHAINS: readonly ChainInfo[] = [
     explorer: "https://sepolia.basescan.org",
     rpc: "https://sepolia.base.org",
     usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    swapRoutes: false,
   },
 ] as const;
 
@@ -116,6 +99,23 @@ export function setActiveChainId(id: ChainId) {
   active = id;
   for (const fn of chainListeners) fn();
 }
+
+/**
+ * Do two chain labels name the same network?
+ *
+ * The backend serves both Base networks from one account, so a list read comes
+ * back mixed and the client is what separates them. Case-insensitive, because
+ * rows written before the labels were normalised may carry "Base" rather than
+ * "base". An empty label matches nothing: showing an unplaceable row on both
+ * networks would add a testnet dollar to a real total.
+ *
+ * Takes the active label rather than reading the store, so a caller inside a
+ * memo has an honest dependency on the chain it filtered by.
+ */
+export const sameChain = (
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
 export class ApiError extends Error {
   constructor(
@@ -204,6 +204,22 @@ async function envelope<T>(url: string): Promise<T> {
   const body = await readBody(res);
   if (!res.ok) throw new ApiError(res.status, errorMessage(body, res.status));
   return (body as { data: T }).data;
+}
+
+/** Same as envelope(), for a public read that is not wrapped in {"data": …}. */
+async function plainJson<T>(url: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    throw new ApiError(
+      0,
+      `cannot reach ${url} (${e instanceof Error ? e.message : "network error"})`,
+    );
+  }
+  const body = await readBody(res);
+  if (!res.ok) throw new ApiError(res.status, errorMessage(body, res.status));
+  return body as T;
 }
 
 /**
@@ -319,25 +335,70 @@ const DISPLAY_ASSET: Record<string, string> = { WETH: "ETH" };
  */
 export const QUOTE_ASSET = "USDC";
 
+/** One entry of the executor's swap allowlist, as GET /public/swap-paths. */
+export type SwapPath = {
+  chain_id: number;
+  from: string;
+  to: string;
+  hops: number;
+};
+
 /**
- * Can a USDC deposit actually acquire this asset on this chain?
- *
- * USDC itself needs no conversion. Everything else is bought by swapping, and
- * the executor refuses any pair absent from its swap allowlist — so a token
- * with no path is not a token you can put in a basket you fund.
- *
- * ponytail: the allowlist is per-pair, but nothing exposes it yet — the
- * executor loads swaps.json privately and routes only /health (a count) and
- * /venues (the *venue* allowlist). Until GET /swaps lands this answers at
- * chain granularity, which is exact on Sepolia (zero paths) and optimistic on
- * mainnet (four pairs). Every caller goes through this one function, so
- * swapping the data source is a change to this body alone.
+ * The executor's swap allowlist. Unauthenticated, and not wrapped in the
+ * {"data": …} envelope the other public reads use.
  */
-export function isSwappable(asset: string, chain: ChainInfo): boolean {
-  return asset === QUOTE_ASSET || chain.swapRoutes;
+export const swapPaths = () =>
+  plainJson<{ quote_asset: string; count: number; paths: SwapPath[] | null }>(
+    `${WALLET_URL}/public/swap-paths`,
+  );
+
+/**
+ * What a USDC deposit can actually be converted into on `chainId`: the quote
+ * asset itself, plus every allowlisted target.
+ */
+export function swappableAssets(
+  res: { quote_asset: string; paths: SwapPath[] | null },
+  chainId: ChainId = activeChainId(),
+): Set<string> {
+  const out = new Set<string>([res.quote_asset]);
+  for (const p of res.paths ?? []) {
+    if (p.chain_id === chainId && p.from === res.quote_asset) out.add(p.to);
+  }
+  return out;
+}
+
+/**
+ * Can a USDC deposit acquire this asset?
+ *
+ * `targets` null means the allowlist could not be read — a 503 or a network
+ * error, not an empty allowlist. Unknown is answered `true`: a transient
+ * failure must not grey out every token on the page and tell the user, wrongly,
+ * that nothing can be bought. The deposit itself is still refused executor-side
+ * if the path really is missing, so the honest failure is preserved either way.
+ */
+export function isSwappable(
+  asset: string,
+  targets: ReadonlySet<string> | null,
+): boolean {
+  return targets === null || targets.has(asset);
 }
 
 export const displayAsset = (symbol: string) => DISPLAY_ASSET[symbol] ?? symbol;
+
+/**
+ * Venue `project` slug -> the protocol's own name. Display only: the slug is
+ * what the API is given and what a mark is resolved by, and an unknown slug is
+ * shown verbatim rather than prettified into something nobody deployed.
+ */
+const DISPLAY_PROJECT: Record<string, string> = {
+  "aave-v3": "Aave v3",
+  "compound-v3": "Compound v3",
+  "morpho-blue": "Morpho Blue",
+  moonwell: "Moonwell",
+};
+
+export const displayProject = (project: string) =>
+  DISPLAY_PROJECT[project] ?? project;
 
 /**
  * Even split across assets, summing to exactly `total` (bps by default;

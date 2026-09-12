@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { blendApy, market, publicBaskets } from "@/lib/api";
+import { blendApy, market, publicBaskets, sameChain } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
 import { ErrorBox, Spinner } from "@/components/ui";
@@ -29,9 +30,15 @@ export function InvestPage() {
   );
   const summaries = useAsync(`assets:${chain.label}`, () => market.assets());
 
+  // Both networks come back in one list, so the selected chain is what picks
+  // the rows apart. `chain.label` is in the deps because switching networks has
+  // to re-run this, not just re-render around it.
   const baskets: BasketSummary[] = useMemo(
-    () => (authenticated ? (authed.data ?? []) : (anon.data ?? [])),
-    [authenticated, authed.data, anon.data],
+    () =>
+      (authenticated ? (authed.data ?? []) : (anon.data ?? [])).filter((b) =>
+        sameChain(b.chain, chain.label),
+      ),
+    [authenticated, authed.data, anon.data, chain.label],
   );
   const loading = authenticated ? authed.loading : anon.loading;
   const error = authenticated ? authed.error : anon.error;
@@ -105,9 +112,19 @@ export function InvestPage() {
         baskets={filtered}
         apys={apys}
         empty={
-          baskets.length === 0
-            ? "No public baskets yet."
-            : "No basket matches these filters."
+          baskets.length === 0 ? (
+            // Not an empty table: an empty table on the wrong network looks
+            // broken, and the answer is either to switch or to make one.
+            <>
+              No baskets on {chain.name} yet.{" "}
+              <Link href="/" className="text-foreground underline underline-offset-4">
+                Create one
+              </Link>
+              .
+            </>
+          ) : (
+            "No basket matches these filters."
+          )
         }
       />
 

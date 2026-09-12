@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import {
+  QUOTE_ASSET,
+  basescanAddress,
   displayAsset,
   fmtBps,
   fmtPct,
+  fmtTime,
   fmtUsd,
-  market,
   publicBasket,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
@@ -20,18 +22,19 @@ import {
   ErrorBox,
   Label,
   Panel,
-  Picker,
-  SettleReport,
   Spinner,
 } from "@/components/ui";
+import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { CountUp, Reveal, Segmented } from "@/components/motion";
-import type {
-  Basket,
-  BasketSummary,
-  Plan,
-  Portfolio,
-  SettleResult,
+import { BasketFlow, type FlowLeg } from "@/components/basket/BasketFlow";
+import {
+  IDLE_VENUE_ID,
+  type Basket,
+  type BasketSummary,
+  type Plan,
+  type Portfolio,
+  type SettleResult,
 } from "@/lib/types";
 
 type Mode = "deposit" | "withdraw";
@@ -43,17 +46,13 @@ export default function BasketPage() {
 
   const [mode, setMode] = useState<Mode>("deposit");
   const [amount, setAmount] = useState("1000");
-  const [asset, setAsset] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    status: number;
-    data: SettleResult;
-  } | null>(null);
+  // Outcomes are announced, not stacked under the panel. `detail` is only set
+  // when the user opens the per-leg breakdown from a partial result.
+  const { notify, detail, clear } = useSettleToast();
 
   const chain = useChain();
-  const assets = useAsync(`assets:${chain.label}`, () => market.assets());
   // Anyone can look at a basket. The authed route is only used once there is a
   // session, because it is the one that knows whether you are subscribed.
   const anon = useAsync<BasketSummary | null>(
@@ -74,27 +73,70 @@ export default function BasketPage() {
     return () => clearTimeout(t);
   }, [parsed, amountValid]);
 
-  const list = useMemo(() => assets.data?.assets ?? [], [assets.data]);
-  // No hardcoded ticker: the tradeable set comes from market-data.
-  const source = asset ?? list[0]?.asset ?? null;
-  const balance = (portfolio.data?.onchain?.balances ?? []).find(
-    (b) => b.symbol === source,
-  );
-
   const b: BasketSummary | null = basket.data;
-  const plan = useApi<Plan>(
-    mode === "deposit" && debounced > 0
-      ? `/v1/baskets/${id}/plan?amount_usd=${debounced}`
-      : null,
+  const balance = (portfolio.data?.onchain?.balances ?? []).find(
+    (x) => x.symbol === QUOTE_ASSET,
   );
-  const legs = plan.data?.legs ?? [];
-  const apy = plan.data?.blended_apy ?? 0;
-  const yearly = amountValid ? (parsed * apy) / 100 : 0;
 
-  // Money held in this basket, the ceiling on a withdrawal.
-  const held = (portfolio.data?.positions ?? [])
-    .filter((p) => p.basket_id === id)
-    .reduce((s, p) => s + p.amount_usd, 0);
+  const plan = useApi<Plan>(
+    debounced > 0 ? `/v1/baskets/${id}/plan?amount_usd=${debounced}` : null,
+  );
+
+  // What this user actually holds in this basket. The only money figure the
+  // API gives for a basket — there is no protocol-wide TVL field.
+  const holdings = useMemo(
+    () => (portfolio.data?.positions ?? []).filter((p) => p.basket_id === id),
+    [portfolio.data, id],
+  );
+  const held = holdings.reduce((s, p) => s + p.amount_usd, 0);
+
+  /**
+   * Real positions when there are any, the routing plan otherwise. Two very
+   * different claims, so the caption says which one is on screen.
+   */
+  const { legs, caption } = useMemo((): {
+    legs: FlowLeg[];
+    caption: string;
+  } => {
+    if (holdings.length > 0) {
+      return {
+        legs: holdings.map((h) => ({
+          asset: h.asset,
+          // onchain_usd null means the holding could not be valued; the stored
+          // amount is what we last placed, so show that and never invent one.
+          amountUsd: h.onchain_usd ?? h.amount_usd,
+          venue:
+            h.venue_id === IDLE_VENUE_ID
+              ? null
+              : { project: h.project, apy: h.current_apy },
+          idle: h.venue_id === IDLE_VENUE_ID,
+          reason: h.value_reason,
+        })),
+        caption: "Your positions in this basket, as last reconciled on chain.",
+      };
+    }
+    const pl = plan.data?.legs ?? [];
+    return {
+      legs: pl.map((l) => ({
+        asset: l.asset,
+        amountUsd: l.price_usd === null ? null : l.amount_usd,
+        venue: l.venue ? { project: l.venue.project, apy: l.venue.apy } : null,
+        idle: false,
+        reason: l.reason,
+      })),
+      caption: `Routing plan for ${
+        amountValid ? fmtUsd(parsed) : "a deposit"
+      } — nothing is placed yet.`,
+    };
+  }, [holdings, plan.data, amountValid, parsed]);
+
+  // Live blended rate: what the money is earning if it is placed, what it
+  // would earn if it is not.
+  const apy =
+    holdings.length > 0 && held > 0
+      ? holdings.reduce((s, h) => s + (h.current_apy * h.amount_usd) / held, 0)
+      : (plan.data?.blended_apy ?? null);
+  const yearly = amountValid && apy !== null ? (parsed * apy) / 100 : null;
 
   // One button, one next step. Onboarding has no page of its own.
   const step = !ready
@@ -117,41 +159,48 @@ export default function BasketPage() {
 
   async function toggleSubscription() {
     setSubBusy(true);
-    setErr(null);
     try {
       await api(`/v1/baskets/${id}/subscribe`, {
         method: b?.subscribed ? "DELETE" : "POST",
       });
       authedBasket.reload();
     } catch (e) {
-      // 412 carries the precondition that is missing; show it verbatim.
-      setErr(e instanceof Error ? e.message : String(e));
+      // 412 carries the precondition that is missing; shown verbatim.
+      toastError(e);
     } finally {
       setSubBusy(false);
     }
   }
 
-  async function settle() {
+  async function settle(all = false) {
     setBusy(true);
-    setErr(null);
-    setResult(null);
+    clear();
     try {
       const res = await api<SettleResult>(`/v1/baskets/${id}/${mode}`, {
         method: "POST",
-        body: JSON.stringify({ amount_usd: parsed }),
+        body: JSON.stringify(all ? { all: true } : { amount_usd: parsed }),
       });
-      setResult({ status: res.status, data: res.data });
+      // 207 is a result, not an error: it warns and keeps its breakdown.
+      const clean = notify(res.status, res.data, {
+        key: id,
+        verb: mode === "deposit" ? "Deposited" : "Withdrew",
+      });
+      // Nothing left to read once it went through cleanly, so the form empties.
+      if (clean) setAmount("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      toastError(e);
     } finally {
       setBusy(false);
       portfolio.reload();
     }
   }
 
+  const weights = b?.weights ?? [];
+  const handle = weights.map((w) => displayAsset(w.asset)).join(" · ");
+
   return (
     <main className="w-full px-4 pb-24 pt-8">
-      <Reveal className="mx-auto w-full max-w-lg space-y-6">
+      <Reveal className="mx-auto w-full max-w-6xl space-y-6">
         <Link
           href="/invest"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -160,231 +209,315 @@ export default function BasketPage() {
           All baskets
         </Link>
 
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-medium tracking-tight">
-              {b?.name ?? (basket.loading ? "…" : "Basket")}
-            </h1>
-            <p className="truncate text-sm text-muted-foreground">
-              {(b?.weights ?? []).map((w) => displayAsset(w.asset)).join(" · ") || "—"}
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span aria-hidden className="flex shrink-0 -space-x-2">
+              {weights.slice(0, 3).map((w) => (
+                <TokenIcon key={w.asset} symbol={w.asset} size={36} />
+              ))}
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-medium tracking-tight">
+                {b?.name ?? (basket.loading ? "…" : "Basket")}
+              </h1>
+              <p className="truncate text-sm text-muted-foreground">
+                {handle || "—"}
+              </p>
+            </div>
           </div>
-          {b && authenticated && (
-            <Button
-              variant="ghost"
-              disabled={subBusy}
-              onClick={() => void toggleSubscription()}
-            >
-              {subBusy ? "Working…" : b.subscribed ? "Exit basket" : "Subscribe"}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {b && authenticated && (
+              <Button
+                variant="ghost"
+                disabled={subBusy}
+                onClick={() => void toggleSubscription()}
+              >
+                {subBusy ? "Working…" : b.subscribed ? "Exit basket" : "Subscribe"}
+              </Button>
+            )}
+            {/* On a narrow screen the panel is below the fold, so the primary
+                action is a link to it rather than a second copy of it. */}
+            <a href="#fund">
+              <Button onClick={() => setMode("deposit")}>Deposit</Button>
+            </a>
+          </div>
         </div>
 
         {basket.error && <ErrorBox message={basket.error} />}
 
-        <Segmented
-          id="mode"
-          value={mode}
-          onChange={(m) => {
-            setMode(m);
-            setResult(null);
-            setErr(null);
-          }}
-          options={[
-            { value: "deposit", label: "Deposit" },
-            { value: "withdraw", label: "Withdraw" },
-          ]}
-        />
-
-        {/* Plain figures, one hairline between them. Not two bordered cards. */}
-        <div className="flex items-stretch gap-6 px-1">
-          <Figure
-            label={mode === "deposit" ? "APY" : "Held in basket"}
-            value={
-              mode === "withdraw" ? (
-                fmtUsd(held)
-              ) : plan.data ? (
-                <CountUp value={apy} format={(n) => fmtPct(n)} />
-              ) : (
-                "—"
-              )
-            }
-            tone={mode === "deposit" ? "good" : undefined}
-          />
-          <div className="w-px self-stretch bg-border" />
-          <Figure
-            label={mode === "deposit" ? "Rewards / year" : "Blended APY"}
-            value={
-              mode === "withdraw"
-                ? portfolio.data
-                  ? fmtPct(portfolio.data.blended_apy)
-                  : "—"
-                : plan.data && amountValid
-                  ? fmtUsd(yearly)
-                  : "—"
-            }
-          />
-        </div>
-
-        <Panel>
-          <div className="p-5">
-            <div className="flex items-center justify-between">
-              <Label>{mode === "deposit" ? "Amount in" : "Amount out"}</Label>
-              {mode === "deposit"
-                ? balance && (
-                    <span className="tnum text-sm text-muted-foreground">
-                      {balance.value} {balance.symbol}
-                    </span>
-                  )
-                : held > 0 && (
-                    <button
-                      onClick={() => setAmount(String(held))}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      Max {fmtUsd(held)}
-                    </button>
-                  )}
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                inputMode="decimal"
-                aria-label="Amount in USD"
-                placeholder="0.00"
-                className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6 lg:col-span-2">
+            <Panel>
+              <div className="flex items-center justify-between px-5 pt-5">
+                <Label>Where the funds are</Label>
+                {plan.loading && holdings.length === 0 && <Spinner />}
+              </div>
+              <BasketFlow
+                legs={legs}
+                caption={caption}
+                emptyLabel={
+                  authenticated
+                    ? "Nothing here yet. Enter an amount to see where it would be routed."
+                    : "Connect to see where this basket routes."
+                }
               />
-              {mode === "deposit" && (
-                <Picker
-                  ariaLabel="Asset"
-                  value={source}
-                  onChange={setAsset}
-                  placeholder={assets.loading ? "…" : "none"}
-                  options={list.map((a) => ({
-                    value: a.asset,
-                    label: displayAsset(a.asset),
-                    hint: fmtPct(a.best_apy),
-                  }))}
-                />
-              )}
-            </div>
-            {assets.error && (
-              <p className="mt-3 text-xs text-destructive">{assets.error}</p>
-            )}
-          </div>
+            </Panel>
 
-          {mode === "deposit" && (
-            <>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Stat
+                label="APY"
+                tone="good"
+                value={apy === null ? "—" : <CountUp value={apy} format={fmtPct} />}
+                note={
+                  holdings.length > 0 ? "on your positions" : "on the routing plan"
+                }
+              />
+              <Stat
+                label="Your position"
+                value={authenticated ? fmtUsd(held) : "—"}
+                // The API exposes this caller's holdings only; there is no
+                // basket-wide TVL to report, and inventing one is worse than
+                // labelling what we actually have.
+                note="this basket, your wallet"
+              />
+              <Stat
+                label="Creator"
+                value={
+                  b?.created_by_me === undefined
+                    ? "—"
+                    : b.created_by_me
+                      ? "You"
+                      : "Another user"
+                }
+                note={b?.created_at ? fmtTime(b.created_at) : undefined}
+              />
+            </div>
+
+            <Panel>
+              <div className="p-5">
+                <Label>About</Label>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {b?.description?.trim() ||
+                    "No description. The allocation above is the whole of it."}
+                </p>
+              </div>
+              <Divider />
+              <dl className="space-y-2 px-5 py-4 text-sm">
+                <Row label="Network" value={b?.chain ?? chain.name} />
+                <Row label="Fee" value={b ? fmtBps(b.fee_bps) : "—"} />
+                <Row label="Basket id" value={b?.id ?? "—"} />
+                <Row
+                  label="Allocation"
+                  value={
+                    weights.map((w) => `${displayAsset(w.asset)} ${fmtBps(w.weight_bps)}`).join(
+                      " · ",
+                    ) || "—"
+                  }
+                />
+              </dl>
               <Divider />
               <div className="p-5">
-                <Label>Routing</Label>
-                {!authenticated ? (
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    Connect to see where each slice would be routed.
+                <Label>Contracts</Label>
+                {/* Only addresses we actually hold: the deposit asset, and any
+                    basket token the portfolio read resolved on chain. Nothing
+                    is derived from a ticker. */}
+                <ul className="mt-3 space-y-2 text-sm">
+                  <AddressRow symbol={QUOTE_ASSET} address={chain.usdc} />
+                  {weights.map((w) => {
+                    const bal = (portfolio.data?.onchain?.balances ?? []).find(
+                      (x) => x.symbol === w.asset,
+                    );
+                    return bal ? (
+                      <AddressRow
+                        key={w.asset}
+                        symbol={w.asset}
+                        address={bal.contract}
+                      />
+                    ) : null;
+                  })}
+                  {portfolio.data?.wallet_address && (
+                    <AddressRow
+                      symbol="Your wallet"
+                      address={portfolio.data.wallet_address}
+                      plain
+                    />
+                  )}
+                </ul>
+              </div>
+            </Panel>
+          </div>
+
+          <div id="fund" className="lg:sticky lg:top-24 lg:self-start">
+            <Panel>
+              <div className="p-5">
+                <Segmented
+                  id="mode"
+                  value={mode}
+                  onChange={(m) => {
+                    setMode(m);
+                    clear();
+                  }}
+                  options={[
+                    { value: "deposit", label: "Deposit" },
+                    { value: "withdraw", label: "Withdraw" },
+                  ]}
+                />
+              </div>
+
+              <Divider />
+
+              <div className="p-5">
+                <div className="flex items-center justify-between">
+                  <Label>{mode === "deposit" ? "Amount in" : "Amount out"}</Label>
+                  {mode === "deposit"
+                    ? balance && (
+                        <button
+                          type="button"
+                          onClick={() => setAmount(String(balance.value))}
+                          className="tnum text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          {balance.value} {balance.symbol}
+                        </button>
+                      )
+                    : held > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAmount(String(held))}
+                          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          Max {fmtUsd(held)}
+                        </button>
+                      )}
+                </div>
+                <div className="mt-4 flex items-center gap-3">
+                  <input
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    inputMode="decimal"
+                    aria-label="Amount in USDC"
+                    placeholder="0.00"
+                    className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
+                  />
+                  {/* Always USDC, never a picker: the basket's tokens are what
+                      it is converted into, which is a different control. */}
+                  <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">
+                    <TokenIcon symbol={QUOTE_ASSET} size={20} />
+                    {QUOTE_ASSET}
+                  </span>
+                </div>
+                {mode === "deposit" && yearly !== null && (
+                  <p className="tnum mt-3 text-xs text-muted-foreground">
+                    ≈ {fmtUsd(yearly)} / year at {apy === null ? "—" : fmtPct(apy)}
                   </p>
-                ) : plan.loading ? (
-                  <div className="mt-4">
-                    <Spinner label="Planning…" />
-                  </div>
-                ) : plan.error ? (
-                  <div className="mt-4">
-                    <ErrorBox message={plan.error} />
-                  </div>
-                ) : (
-                  <ul className="mt-4 space-y-3">
-                    {legs.map((l) => (
-                      <li key={l.asset} className="text-sm">
-                        <div className="flex items-center gap-3">
-                          <span className="inline-flex items-center gap-2">
-                          <TokenIcon symbol={l.asset} size={18} />
-                          {displayAsset(l.asset)}
-                        </span>
-                          <span className="tnum text-xs text-muted-foreground">
-                            {fmtBps(l.weight_bps)}
-                          </span>
-                          <span className="tnum ml-auto">
-                            {fmtUsd(l.amount_usd)}
-                          </span>
-                          <span className="tnum w-16 text-right text-xs text-positive">
-                            {l.venue ? fmtPct(l.venue.apy) : "—"}
-                          </span>
-                        </div>
-                        {/* A missing price is never substituted with a number. */}
-                        {l.price_usd === null && (
-                          <div className="mt-1 text-xs text-warning">
-                            value unknown — {l.reason || "no price feed"}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
                 )}
               </div>
-            </>
-          )}
 
-          <Divider />
+              <Divider />
 
-          <dl className="space-y-2 px-5 py-4 text-sm">
-            <Row label="Network" value={b?.chain ?? chain.name} />
-            <Row label="Fee" value={b ? fmtBps(b.fee_bps) : "—"} />
-          </dl>
+              <div className="space-y-3 p-5">
+                <Button
+                  className="w-full py-3"
+                  disabled={
+                    busy ||
+                    step === "loading" ||
+                    step === "syncing" ||
+                    (step === "ready" && (!amountValid || !b))
+                  }
+                  onClick={() => void (step === "ready" ? settle() : gate())}
+                >
+                  {busy
+                    ? "Executing…"
+                    : step === "connect"
+                      ? "Connect"
+                      : step === "wallet"
+                        ? "Create wallet"
+                        : step === "delegate"
+                          ? "Enable delegation"
+                          : step === "ready"
+                            ? `${mode === "deposit" ? "Deposit" : "Withdraw"} ${
+                                amountValid ? fmtUsd(parsed) : ""
+                              }`
+                            : "…"}
+                </Button>
+                {mode === "withdraw" && step === "ready" && held > 0 && (
+                  <Button
+                    variant="ghost"
+                    className="w-full"
+                    disabled={busy}
+                    onClick={() => void settle(true)}
+                  >
+                    Withdraw everything
+                  </Button>
+                )}
+                {plan.error && mode === "deposit" && (
+                  <p className="text-xs text-warning">{plan.error}</p>
+                )}
+              </div>
+            </Panel>
 
-          <div className="p-5 pt-0">
-            <Button
-              className="w-full py-3"
-              disabled={
-                busy ||
-                step === "loading" ||
-                step === "syncing" ||
-                (step === "ready" && (!amountValid || !b))
-              }
-              onClick={() => void (step === "ready" ? settle() : gate())}
-            >
-              {busy
-                ? "Executing…"
-                : step === "connect"
-                  ? "Connect"
-                  : step === "wallet"
-                    ? "Create wallet"
-                    : step === "delegate"
-                      ? "Enable delegation"
-                      : step === "ready"
-                        ? `${mode === "deposit" ? "Deposit" : "Withdraw"} ${
-                            amountValid ? fmtUsd(parsed) : ""
-                          }`
-                        : "…"}
-            </Button>
+            {detail && (
+              <div className="mt-4">
+                <SettleDetail detail={detail} onClose={clear} />
+              </div>
+            )}
           </div>
-        </Panel>
-
-        {err && <ErrorBox message={err} />}
-        {result && <SettleReport result={result.data} status={result.status} />}
+        </div>
       </Reveal>
     </main>
   );
 }
 
-function Figure({
+function Stat({
   label,
   value,
+  note,
   tone,
 }: {
   label: string;
   value: React.ReactNode;
+  note?: string;
   tone?: "good";
 }) {
   return (
-    <div className="flex-1">
+    <Panel className="p-5">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div
-        className={`tnum mt-1 text-3xl font-medium tracking-tight ${
+        className={`tnum mt-1 truncate text-2xl font-medium tracking-tight ${
           tone === "good" ? "text-positive" : "text-foreground"
         }`}
       >
         {value}
       </div>
-    </div>
+      {note && <div className="mt-1 text-xs text-muted-foreground">{note}</div>}
+    </Panel>
+  );
+}
+
+function AddressRow({
+  symbol,
+  address,
+  plain,
+}: {
+  symbol: string;
+  address: string;
+  plain?: boolean;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3">
+      <span className="inline-flex items-center gap-2 text-muted-foreground">
+        {!plain && <TokenIcon symbol={symbol} size={18} />}
+        {plain ? symbol : displayAsset(symbol)}
+      </span>
+      <a
+        href={basescanAddress(address)}
+        target="_blank"
+        rel="noreferrer"
+        className="tnum inline-flex items-center gap-1 truncate text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+      >
+        {address}
+        <ExternalLink className="size-3 shrink-0" />
+      </a>
+    </li>
   );
 }
 

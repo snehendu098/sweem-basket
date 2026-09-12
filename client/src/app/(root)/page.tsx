@@ -11,6 +11,8 @@ import {
   fmtUsd,
   isSwappable,
   market,
+  swapPaths,
+  swappableAssets,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
@@ -21,10 +23,10 @@ import {
   Label,
   MultiPicker,
   Panel,
-  SettleReport,
   Spinner,
   Tooltip,
 } from "@/components/ui";
+import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { CountUp, Reveal } from "@/components/motion";
 import {
@@ -63,14 +65,20 @@ export default function Create() {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   /** Set once creation succeeds. Never cleared by a failed deposit. */
   const [created, setCreated] = useState<Basket | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   /** Which of the two calls the error came from, so the card can say so. */
   const [failedAt, setFailedAt] = useState<"create" | "fund" | null>(null);
+  const { notify, detail, clear } = useSettleToast();
 
   // The key carries the chain: switching networks is a different question,
   // not a stale answer.
   const assets = useAsync(`assets:${chain.label}`, () => market.assets());
   const list = assets.data?.assets ?? [];
+  // The executor's swap allowlist, the only source of truth for what a USDC
+  // deposit can be converted into. Null while loading or on failure.
+  const swaps = useAsync(`swap-paths:${chain.label}`, swapPaths);
+  const swappable = swaps.data
+    ? swappableAssets(swaps.data, chain.chainId)
+    : null;
   const portfolio = useApi<Portfolio>("/v1/portfolio");
   const balance = (portfolio.data?.onchain?.balances ?? []).find(
     (b) => b.symbol === QUOTE_ASSET,
@@ -86,10 +94,13 @@ export default function Create() {
       : null,
   );
 
-  const split = evenSplit(picked);
+  // Switching networks can strand an already-picked token on a chain with no
+  // route to it. Drop it here rather than shipping a basket that cannot fund.
+  const chosen = picked.filter((a) => !blocked(a));
+  const split = evenSplit(chosen);
   // Whole percents that also sum to 100, so 3 tokens reads 34/33/33 and not
   // three 33s. Same largest-remainder rule, different total.
-  const pct = evenSplit(picked, 100);
+  const pct = evenSplit(chosen, 100);
   const apy = split.reduce((s, w) => {
     const m = list.find((x) => x.asset === w.asset);
     return s + ((m?.best_apy ?? 0) * w.weight_bps) / TOTAL_BPS;
@@ -98,13 +109,13 @@ export default function Create() {
   // A token a USDC deposit cannot acquire is not offered at all — the reason
   // lives in a tooltip, so it is answered on hover instead of discovered after
   // a failed deposit. One predicate, so GET /swaps replaces it in one place.
-  const blocked = (asset: string) => !isSwappable(asset, chain);
+  const blocked = (asset: string) => !isSwappable(asset, swappable);
   const noRoute = `no USDC swap route on ${chain.name} — this token cannot be bought with your deposit here`;
   // Above a handful the chip row wraps into a wall; mainnet indexes a dozen.
   const many = list.length > 5;
 
   const busy = phase.kind === "creating" || phase.kind === "funding";
-  const canSubmit = name.trim() !== "" && picked.length > 0 && amountValid;
+  const canSubmit = name.trim() !== "" && chosen.length > 0 && amountValid;
   const locked = created !== null;
 
   const step = !ready
@@ -125,30 +136,31 @@ export default function Create() {
   function reset() {
     setCreated(null);
     setPhase({ kind: "idle" });
-    setErr(null);
+    clear();
     setFailedAt(null);
   }
 
   /** POST the deposit into an existing basket. The retry path is this, alone. */
   async function fund(id: string) {
     setPhase({ kind: "funding" });
-    setErr(null);
+    clear();
     setFailedAt(null);
     try {
       const res = await api<SettleResult>(`/v1/baskets/${id}/deposit`, {
         method: "POST",
         body: JSON.stringify({ amount_usd: parsed }),
       });
-      // 207 is a result, not an error: the report shows it leg by leg, and
-      // navigating away would hide which legs failed or are still pending. A
-      // clean settle has nothing left to read here, so that one moves on.
+      // 207 is a result, not an error: the toast warns and keeps the leg by
+      // leg breakdown one click away, and navigating away would hide which
+      // legs failed or are still pending. A clean settle moves on.
       setPhase({ kind: "funded", status: res.status, data: res.data });
+      notify(res.status, res.data, { key: id, verb: "Deposited" });
       portfolio.reload();
       if (res.status !== 207) router.push(`/baskets/${id}`);
     } catch (e) {
       // The basket still exists and is empty. Say so, and offer the retry that
       // deposits into it instead of creating another one.
-      setErr(e instanceof Error ? e.message : String(e));
+      toastError(e);
       setFailedAt("fund");
       setPhase({ kind: "idle" });
       portfolio.reload();
@@ -168,7 +180,7 @@ export default function Create() {
     if (created) return fund(created.id);
 
     setPhase({ kind: "creating" });
-    setErr(null);
+    clear();
     setFailedAt(null);
     let basket: Basket;
     try {
@@ -186,7 +198,7 @@ export default function Create() {
       });
       basket = res.data;
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      toastError(e);
       setFailedAt("create");
       setPhase({ kind: "idle" });
       return;
@@ -213,7 +225,7 @@ export default function Create() {
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Rewards / year</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight">
-              {amountValid && picked.length > 0 ? fmtUsd((parsed * apy) / 100) : "—"}
+              {amountValid && chosen.length > 0 ? fmtUsd((parsed * apy) / 100) : "—"}
             </div>
           </div>
         </div>
@@ -306,7 +318,15 @@ export default function Create() {
               </div>
             )}
 
-            {picked.length > 0 && (
+            {swaps.error && (
+              <p className="mt-3 text-xs text-warning">
+                could not read the swap allowlist ({swaps.error}) — every token is
+                left selectable, so a missing route will surface at deposit
+                instead of here
+              </p>
+            )}
+
+            {chosen.length > 0 && (
               <div className="mt-5 space-y-1.5">
                 {/* Read-only: the split is always even, so there is nothing to edit. */}
                 {pct.map((w) => (
@@ -325,7 +345,6 @@ export default function Create() {
                 ))}
               </div>
             )}
-
           </div>
 
           <Divider />
@@ -365,7 +384,7 @@ export default function Create() {
 
           <div className="p-5">
             <Label>Routing</Label>
-            {picked.length === 0 ? (
+            {chosen.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">
                 Pick a token to see where your USDC would go.
               </p>
@@ -475,19 +494,14 @@ export default function Create() {
           </div>
         )}
 
-        {err && <ErrorBox message={err} />}
-        {phase.kind === "funded" && (
-          <>
-            <SettleReport result={phase.data} status={phase.status} />
-            {created && (
-              <Link
-                href={`/baskets/${created.id}`}
-                className="inline-block text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              >
-                Open “{created.name}”
-              </Link>
-            )}
-          </>
+        {detail && <SettleDetail detail={detail} onClose={clear} />}
+        {phase.kind === "funded" && created && (
+          <Link
+            href={`/baskets/${created.id}`}
+            className="inline-block text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Open “{created.name}”
+          </Link>
         )}
       </Reveal>
     </main>

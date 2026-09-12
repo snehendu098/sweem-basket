@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { basescanTx, displayAsset, fmtUsd, shortHash } from "@/lib/api";
+import {
+  basescanTx,
+  displayAsset,
+  displayProject,
+  fmtUsd,
+  shortHash,
+} from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
 import { cn } from "@/lib/utils";
 import type { LegResult, LegStatus, SettleResult, Step } from "@/lib/types";
@@ -430,7 +436,9 @@ function LegRow({ leg }: { leg: LegResult }) {
           {fmtUsd(leg.amount_usd)}
         </span>
         {leg.project && (
-          <span className="text-xs text-muted-foreground">{leg.project}</span>
+          <span className="text-xs text-muted-foreground">
+            {displayProject(leg.project)}
+          </span>
         )}
         {leg.tx_hash && <TxLink hash={leg.tx_hash} />}
       </div>

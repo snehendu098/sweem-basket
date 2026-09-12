@@ -13,7 +13,7 @@ export function BasketTable({
   baskets: BasketSummary[];
   apys: Map<string, number | null>;
   /** What to say when there is nothing to show. */
-  empty: string;
+  empty: React.ReactNode;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">

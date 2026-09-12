@@ -5,6 +5,7 @@
  *   - a null price renders as "value unknown", never a fabricated dollar
  *   - an uncomputable basket APY is null, never 0
  *   - an even split always sums to exactly 10000 bps
+ *   - a chain label only ever matches its own network
  *
  * Run: bun run src/lib/api.check.ts
  */
@@ -12,10 +13,13 @@ import assert from "node:assert/strict";
 import {
   ApiError,
   DEFAULT_CHAIN_ID,
+  isSwappable,
+  swappableAssets,
   activeChain,
   basescanTx,
   blendApy,
   displayAsset,
+  sameChain,
   evenSplit,
   readBalances,
   setActiveChainId,
@@ -25,7 +29,8 @@ import {
   publicBaskets,
   walletFetch,
 } from "./api";
-import type { AssetSummary } from "./types";
+import { ownership } from "./types";
+import type { AssetSummary, BasketSummary } from "./types";
 
 type Stub = { status: number; body: unknown };
 const realFetch = globalThis.fetch;
@@ -183,6 +188,50 @@ async function main() {
   assert.equal(dead.usdc, null);
 
   globalThis.fetch = realFetch;
+
+  // The swap allowlist decides which tokens a USDC deposit can buy. Only
+  // outbound paths on the active chain count.
+  const paths = {
+    quote_asset: "USDC",
+    paths: [
+      { chain_id: 8453, from: "USDC", to: "WETH", hops: 1 },
+      { chain_id: 8453, from: "WETH", to: "USDC", hops: 1 }, // the exit, not a target
+      { chain_id: 84532, from: "USDC", to: "WETH", hops: 1 }, // other chain
+    ],
+  };
+  const targets = swappableAssets(paths, 8453);
+  assert.deepEqual([...targets].sort(), ["USDC", "WETH"]);
+  assert.deepEqual([...swappableAssets(paths, 84532)].sort(), ["USDC", "WETH"]);
+  assert.equal(isSwappable("cbBTC", targets), false);
+  assert.equal(isSwappable("USDC", targets), true);
+  // A failed read is unknown, not "nothing is swappable": everything stays
+  // selectable rather than the whole token list greying out on a 503.
+  assert.equal(isSwappable("cbBTC", null), true);
+  // An empty allowlist really is empty, and is not confused with a failure.
+  assert.equal(
+    isSwappable("WETH", swappableAssets({ quote_asset: "USDC", paths: null })),
+    false,
+  );
+
+  // "Your status" never claims anything about a caller that does not exist.
+  const basket = (x: Partial<BasketSummary>) => x as BasketSummary;
+  assert.equal(ownership(basket({})), null);
+  assert.equal(ownership(basket({ subscribed: false })), "not joined");
+  assert.equal(ownership(basket({ subscribed: true })), "joined");
+  assert.equal(ownership(basket({ created_by_me: true, subscribed: false })), "created");
+  assert.equal(
+    ownership(basket({ created_by_me: true, subscribed: true })),
+    "created · joined",
+  );
+
+  // Chain separation: a testnet row must never be counted on mainnet, and an
+  // older differently-cased label must not orphan its row.
+  assert.equal(sameChain("base", "base"), true);
+  assert.equal(sameChain("Base", "base"), true);
+  assert.equal(sameChain("base", "base-sepolia"), false);
+  assert.equal(sameChain("", "base"), false);
+  assert.equal(sameChain(undefined, "base"), false);
+
   console.log("api.check: all assertions passed");
 }
 

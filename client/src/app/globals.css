@@ -137,3 +137,16 @@ body {
     @apply font-sans;
   }
 }
+
+/* React Flow ships a light default theme. Only the pieces it paints itself —
+   the edges, their arrowheads and the dotted background — need retinting; the
+   nodes are our own markup and already themed. There are no edge labels to
+   restyle: every figure lives inside the node it belongs to. */
+.react-flow {
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-edge-stroke-width-default: 1.5;
+  --xy-background-pattern-dots-color-default: var(--border);
+  --xy-node-boxshadow-default: none;
+  --xy-node-border-default: none;
+  --xy-node-background-color-default: transparent;
+}

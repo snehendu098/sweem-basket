@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import "./globals.css";
 import { ChainProvider } from "@/lib/chain";
 import { SessionProvider } from "@/lib/session";
+import { Toaster } from "@/components/Toaster";
 
 const poppins = Poppins({
   variable: "--font-geist-sans",
@@ -28,6 +29,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ChainProvider>
           <SessionProvider>{children}</SessionProvider>
         </ChainProvider>
+        {/* One mount for the whole app: every settle outcome is announced here
+            rather than as a block under whichever panel produced it. */}
+        <Toaster />
       </body>
     </html>
   );
