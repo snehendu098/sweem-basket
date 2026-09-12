@@ -141,12 +141,19 @@ function Card({ data }: NodeProps<CardNode>) {
 
 const nodeTypes = { card: Card };
 
-// Two lines of content per card now that the figures live inside them, so the
-// rows are pitched off the taller box and the columns are measured for the
-// longest label each one can hold ("Compound v3", "value unknown").
-const ROW = 96;
+// Every card is the same fixed height, whether it carries one line or two.
+// React Flow puts a handle at the vertical centre of the node box, so equal
+// heights are what makes a same-row connection come out horizontal — a taller
+// asset card next to a shorter wallet card is what made the first edge bow.
+// Widths are measured for the longest label each column can hold
+// ("Compound v3", "value unknown").
+const ROW = 88;
+const HEIGHT = 64;
 const WIDTH = { basket: 150, asset: 160, venue: 180 };
 const COL = { basket: 0, asset: 200, venue: 410 };
+
+/** Straight, because these are connectors: a curve implies a path that bends. */
+const defaultEdgeOptions = { type: "straight" } as const;
 
 /**
  * Where the money is and how it was divided. A diagram, not a canvas: every
@@ -158,12 +165,9 @@ const COL = { basket: 0, asset: 200, venue: 410 };
  */
 export function BasketFlow({
   legs,
-  caption,
   emptyLabel,
 }: {
   legs: FlowLeg[];
-  /** Says whether these are real positions or a routing plan. */
-  caption: string;
   emptyLabel: string;
 }) {
   const { nodes, edges } = useMemo(() => {
@@ -179,7 +183,7 @@ export function BasketFlow({
       // A wallet, not a basket monogram: the money never leaves the user's own
       // wallet, which is the whole point of the architecture.
       data: { title: "Your wallet", wallet: true, ends: "left" },
-      style: { width: WIDTH.basket },
+      style: { width: WIDTH.basket, height: HEIGHT },
       draggable: false,
     });
 
@@ -198,7 +202,7 @@ export function BasketFlow({
             : { value: fmtUsd(l.amountUsd) }),
           symbol: l.asset,
         },
-        style: { width: WIDTH.asset },
+        style: { width: WIDTH.asset, height: HEIGHT },
         draggable: false,
       });
       edges.push({ id: `e-basket-${asset}`, source: "basket", target: asset });
@@ -215,7 +219,7 @@ export function BasketFlow({
             tone: "idle",
             ends: "right",
           },
-          style: { width: WIDTH.venue },
+          style: { width: WIDTH.venue, height: HEIGHT },
           draggable: false,
         });
         edges.push({ id: `e-${asset}-${idle}`, source: asset, target: idle });
@@ -235,7 +239,7 @@ export function BasketFlow({
             tone: "muted",
             ends: "right",
           },
-          style: { width: WIDTH.venue },
+          style: { width: WIDTH.venue, height: HEIGHT },
           draggable: false,
         });
         return;
@@ -254,7 +258,7 @@ export function BasketFlow({
           project: l.venue.project,
           ends: "right",
         },
-        style: { width: WIDTH.venue },
+        style: { width: WIDTH.venue, height: HEIGHT },
         draggable: false,
       });
       edges.push({ id: `e-${asset}-${venue}`, source: asset, target: venue });
@@ -272,29 +276,32 @@ export function BasketFlow({
   }
 
   return (
-    <div>
-      <div style={{ height: Math.max(200, legs.length * ROW + 72) }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.14 }}
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          panOnDrag={false}
-          panOnScroll={false}
-          zoomOnScroll={false}
-          zoomOnPinch={false}
-          zoomOnDoubleClick={false}
-          preventScrolling={false}
-        >
-          <Background gap={20} size={1} className="opacity-40" />
-        </ReactFlow>
-      </div>
-      <p className="px-5 pb-4 text-xs text-muted-foreground">{caption}</p>
+    // pb-3 is the panel's bottom breathing room; border-box means it comes out
+    // of the height, so the height allows for it.
+    <div
+      className="pb-3"
+      style={{ height: Math.max(200, legs.length * ROW + 76) }}
+    >
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
+        fitView
+        fitViewOptions={{ padding: 0.14 }}
+        proOptions={{ hideAttribution: true }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag={false}
+        panOnScroll={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
+        zoomOnDoubleClick={false}
+        preventScrolling={false}
+      >
+        <Background gap={20} size={1} className="opacity-40" />
+      </ReactFlow>
     </div>
   );
 }

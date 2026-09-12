@@ -365,3 +365,100 @@ that is and says so in the leg's `reason`: *"best rate is 14.50% at moonwell,
 which this executor cannot transact; routing to aave-v3 at 4.20% instead"*.
 Discovery surfaces (`/venues`, `/assets` on market-data) keep showing the real
 best rate — a rate we cannot reach is worth naming, not hiding.
+
+## The Privy policy (`cmd/sync-policy`)
+
+The allowlist above is enforced by the executor, in our code. A Privy **policy**
+enforces the same thing in Privy's enclave, so a compromised or misconfigured
+executor still cannot reach a contract nobody allowlisted. Two independent
+limits, not one.
+
+`services/wallet/cmd/sync-policy` generates the policy from
+`executor/venues.json` and `executor/swaps.json` — every address is derived,
+none is hand-written — and creates it or updates it in place.
+
+```bash
+go run ./services/wallet/cmd/sync-policy                        # dry run: prints the JSON
+go run ./services/wallet/cmd/sync-policy -apply                 # create, prints the new id
+go run ./services/wallet/cmd/sync-policy -apply -policy-id <id> # re-sync an existing policy
+```
+
+Run it from the repo root; credentials come from `.env` there
+(`PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_AUTHORIZATION_PRIVATE_KEY`,
+`PRIVY_KEY_QUORUM_ID`). Nothing is written without `-apply` — the tool creates
+durable state on the Privy account and should not do so by accident. `-dry-run`
+forces a dry run even if `-apply` is passed.
+
+**Re-run it whenever `venues.json` or `swaps.json` is regenerated.** A venue
+added to the allowlist but missing from the policy is a leg that fails at
+signing time.
+
+### What it allows
+
+Every rule is emitted for both `eth_sendTransaction` (what the executor uses)
+and `eth_signTransaction` (the same authority without the broadcast). Anything
+not listed is denied: a policy with no matching ALLOW rule refuses the request,
+and `personal_sign`, `eth_signTypedData_v4` and key export have no rules at all.
+
+| Rule | `to` | Calldata |
+|---|---|---|
+| ERC-4626 vault | the kind's targets | `deposit` / `withdraw` / `redeem` |
+| Aave v3 pool | the kind's targets | `supply` / `withdraw` |
+| Compound v3 comet | the kind's targets | `supplyTo` / `withdrawTo` |
+| Moonwell cToken | the kind's targets | `mint` / `redeemUnderlying` |
+| Uniswap SwapRouter02 | the routers in `swaps.json` | `exactInputSingle` / `exactInput` |
+| ERC-20 approve | every venue asset and swap input | `approve`, **with `approve.spender` pinned to the allowlisted targets and routers** |
+| Deny native value | any | `value > 0x0` — a DENY beats every ALLOW above |
+
+Targets are grouped by kind, so an Aave pool cannot be sent `mint` and a cToken
+cannot be sent `supply`. Every ALLOW also pins `chain_id` to the chains present
+in the allowlists.
+
+The `approve.spender` constraint is the one that matters most: an unconstrained
+`approve` is the normal way funds leave a wallet, and Privy's
+`ethereum_calldata` field source supports parameter-level conditions
+(`function_name.param_name`), so the spender is checked, not just the token.
+
+`hold` venues get no call rule — the executor has no calldata for them
+(`deposit_call` refuses the kind). Their token is still reachable as a swap
+input and an approval target, which is all a hold position needs.
+
+Addresses are emitted lowercased and sorted, so re-running against an unchanged
+allowlist produces an identical document. Privy compares EVM addresses
+case-insensitively for `ethereum_transaction.to` and for address arguments
+decoded from calldata, so one form is enough.
+
+An unknown `kind` in `venues.json` is a hard error rather than a skipped venue:
+a kind this tool does not describe means the executor encodes calldata nobody
+here reviewed.
+
+### Attaching it
+
+**Creating the policy enforces nothing.** It has to be attached to the signer.
+
+The delegated signer is the key quorum in `PRIVY_KEY_QUORUM_ID`
+(`NEXT_PUBLIC_PRIVY_SIGNER_ID` on the client side). `client/src/lib/session.tsx`
+attaches the policy when the user delegates:
+
+```ts
+addSigners({ signers: [{ signerId: SIGNER_ID, policyIds: [POLICY_ID] }] })
+```
+
+`policyIds` becomes that signer's **override policy** — Privy evaluates only the
+acting signer's policy, so this constrains exactly the executor's authority and
+nothing else. So, after running the tool:
+
+1. Set `NEXT_PUBLIC_PRIVY_POLICY_ID=<id>` in `client/.env`.
+2. Rebuild the client. It is a build-time Next.js variable; restarting is not
+   enough, and an empty value silently delegates with no policy at all.
+3. **Users who delegated before the id was set keep an unconstrained signer**
+   until they revoke and re-delegate. Existing delegations are not retrofitted
+   by creating or updating the policy.
+
+The tool does not do step 1 itself: it is a client build input, and `sync-policy`
+has no business editing the client. It prints the exact line to add.
+
+A policy can also be attached to a whole wallet via `policy_ids` at wallet
+creation or `PATCH /v1/wallets/{id}`, which applies to every signer including the
+user. That is not what we want here — it would constrain the user's own wallet,
+not just the executor.

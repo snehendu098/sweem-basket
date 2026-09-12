@@ -46,6 +46,8 @@ type swapPath struct {
 // ALLOW rule is refused, and a DENY always beats an ALLOW.
 
 type Policy struct {
+	// ID is only ever populated by Privy on a read or a create response.
+	ID        string `json:"id,omitempty"`
 	Version   string `json:"version"`
 	Name      string `json:"name"`
 	ChainType string `json:"chain_type"`
@@ -77,6 +79,10 @@ type Condition struct {
 // wallet without spending anything, which is how enforcement gets verified.
 var methods = []string{"eth_sendTransaction", "eth_signTransaction"}
 
+// Privy caps a rule name at 50 characters, so the method is tagged rather than
+// spelled out. Rule names must still be unique enough to read in the dashboard.
+var methodTag = map[string]string{"eth_sendTransaction": "send", "eth_signTransaction": "sign"}
+
 // ------------------------------------------------------------------- the ABIs
 
 type abiArg struct {
@@ -87,7 +93,7 @@ type abiArg struct {
 
 type abiFn struct {
 	Name   string   `json:"name"`
-	Type   string   `json:"type"`  // always "function"
+	Type   string   `json:"type"` // always "function"
 	Inputs []abiArg `json:"inputs"`
 	// Privy decodes calldata only; outputs never matter, but the field is part
 	// of a well-formed ABI entry so it is emitted as an empty list.
@@ -222,7 +228,7 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 	add := func(name string, conds ...Condition) {
 		for _, m := range methods {
 			rules = append(rules, Rule{
-				Name:       name + " [" + m + "]",
+				Name:       name + " (" + methodTag[m] + ")",
 				Method:     m,
 				Action:     "ALLOW",
 				Conditions: conds,
@@ -266,7 +272,7 @@ func Build(name, ownerID string, v venueFile, s swapFile) (Policy, error) {
 	// rules above without repeating a condition in each of them.
 	for _, m := range methods {
 		rules = append(rules, Rule{
-			Name:   "Deny any native value transfer [" + m + "]",
+			Name:   "Deny any native value transfer (" + methodTag[m] + ")",
 			Method: m,
 			Action: "DENY",
 			Conditions: []Condition{{

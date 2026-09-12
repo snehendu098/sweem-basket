@@ -402,13 +402,30 @@ This is the honest list. None of it is hidden elsewhere in the repo.
 - **Mainnet has 33 allowlisted venues and zero transactions.** Everything on
   8453 is read-only so far: rates indexed, prices read, quotes taken, allowlist
   generated and verified on chain. No money has moved there.
-- **There is no Privy policy attached.** `NEXT_PUBLIC_PRIVY_POLICY_ID` is empty,
-  so the signer is added with no server-side policy. The local
-  `executor/venues.json` allowlist is currently the *only* constraint on what the
-  delegated signer can call. That is a real single point of failure: it is
-  enforced in our process, not in Privy's. Attaching a policy that pins the same
-  address set is the next thing to do, and it is the difference between "we
-  check" and "Privy checks".
+- **The Privy policy exists and is verified, but is not retrofitted onto
+  existing delegations.** Policy `z1x25a74qs5slp2bd0srk3sy` is generated from
+  `executor/venues.json` and `executor/swaps.json` by
+  `go run ./services/wallet/cmd/sync-policy`, so regenerating the allowlist and
+  re-running keeps Privy in sync. It pins the callable addresses, the methods
+  allowed per venue kind, the chain ids, and — the rule that matters most —
+  constrains `approve.spender` to allowlisted targets, since an unconstrained
+  `approve` is how funds actually leave a wallet. Native value transfers are
+  denied outright.
+
+  Enforcement was measured, not assumed: nine probes against a throwaway wallet
+  using `eth_signTransaction` (which signs without broadcasting, so nothing was
+  spent). Allowed calls signed; an `approve` to an unlisted spender, a transfer
+  to an unlisted address, a wrong chain id, a non-zero value and `personal_sign`
+  all returned `policy_violation`.
+
+  What is *not* done: a signer delegated before the policy id was set keeps an
+  unconstrained override. Privy evaluates the acting signer's own policy, so
+  those users must revoke and re-delegate to pick it up. Until they do, the
+  local allowlist remains the only constraint for them — enforced in our
+  process, not in Privy's. `eth_sendTransaction` was also never exercised
+  against the policy, because it broadcasts and needs funds; its rules are
+  byte-identical to the `eth_signTransaction` ones that passed, which is an
+  inference rather than a measurement.
 - **Base Sepolia has two assets, USDC and WETH.** That is all that exists there —
   four venues total across Aave V3 and Compound III. The demo is small because
   the testnet is small, not because the router is.

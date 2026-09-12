@@ -90,45 +90,30 @@ export default function BasketPage() {
   );
   const held = holdings.reduce((s, p) => s + p.amount_usd, 0);
 
-  /**
-   * Real positions when there are any, the routing plan otherwise. Two very
-   * different claims, so the caption says which one is on screen.
-   */
-  const { legs, caption } = useMemo((): {
-    legs: FlowLeg[];
-    caption: string;
-  } => {
+  /** Real positions when there are any, the routing plan otherwise. */
+  const legs = useMemo((): FlowLeg[] => {
     if (holdings.length > 0) {
-      return {
-        legs: holdings.map((h) => ({
-          asset: h.asset,
-          // onchain_usd null means the holding could not be valued; the stored
-          // amount is what we last placed, so show that and never invent one.
-          amountUsd: h.onchain_usd ?? h.amount_usd,
-          venue:
-            h.venue_id === IDLE_VENUE_ID
-              ? null
-              : { project: h.project, apy: h.current_apy },
-          idle: h.venue_id === IDLE_VENUE_ID,
-          reason: h.value_reason,
-        })),
-        caption: "Your positions in this basket, as last reconciled on chain.",
-      };
+      return holdings.map((h) => ({
+        asset: h.asset,
+        // onchain_usd null means the holding could not be valued; the stored
+        // amount is what we last placed, so show that and never invent one.
+        amountUsd: h.onchain_usd ?? h.amount_usd,
+        venue:
+          h.venue_id === IDLE_VENUE_ID
+            ? null
+            : { project: h.project, apy: h.current_apy },
+        idle: h.venue_id === IDLE_VENUE_ID,
+        reason: h.value_reason,
+      }));
     }
-    const pl = plan.data?.legs ?? [];
-    return {
-      legs: pl.map((l) => ({
-        asset: l.asset,
-        amountUsd: l.price_usd === null ? null : l.amount_usd,
-        venue: l.venue ? { project: l.venue.project, apy: l.venue.apy } : null,
-        idle: false,
-        reason: l.reason,
-      })),
-      caption: `Routing plan for ${
-        amountValid ? fmtUsd(parsed) : "a deposit"
-      } — nothing is placed yet.`,
-    };
-  }, [holdings, plan.data, amountValid, parsed]);
+    return (plan.data?.legs ?? []).map((l) => ({
+      asset: l.asset,
+      amountUsd: l.price_usd === null ? null : l.amount_usd,
+      venue: l.venue ? { project: l.venue.project, apy: l.venue.apy } : null,
+      idle: false,
+      reason: l.reason,
+    }));
+  }, [holdings, plan.data]);
 
   // Live blended rate: what the money is earning if it is placed, what it
   // would earn if it is not.
@@ -254,7 +239,6 @@ export default function BasketPage() {
               </div>
               <BasketFlow
                 legs={legs}
-                caption={caption}
                 emptyLabel={
                   authenticated
                     ? "Nothing here yet. Enter an amount to see where it would be routed."
