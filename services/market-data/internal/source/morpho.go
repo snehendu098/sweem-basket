@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"strings"
 	"time"
 
@@ -49,7 +48,7 @@ type MorphoBlue struct {
 }
 
 // NewMorphoBlue builds the adapter. There is no default subgraph id: the
-// deployment is ours and not yet published, so an unset MORPHO_SUBGRAPH_ID
+// deployment is ours and per chain, so an unset MORPHO_SUBGRAPH_ID_<chain>
 // leaves the adapter present-but-unconfigured rather than pointing at nothing.
 func NewMorphoBlue(chain, subgraphID string, minWindow, maxWindow time.Duration) *MorphoBlue {
 	if minWindow <= 0 {
@@ -167,84 +166,26 @@ func (m *MorphoBlue) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 }
 
 // vaultAPY derives the APY from the widest usable snapshot pair, or reports
-// !ok so the caller drops the vault. Every rejection is deliberate: publishing
-// a rate we do not trust is worse than publishing no venue at all.
+// !ok so the caller drops the vault. The rules for which samples are
+// trustworthy are shared with the intrinsic-rate sampler in growth.go:
+// publishing a rate we do not trust is worse than publishing no venue at all.
 func (m *MorphoBlue) vaultAPY(id string, snaps []morphoSnapshot) (float64, bool) {
-	samples := make([]morphoSample, 0, len(snaps))
+	samples := make([]GrowthSample, 0, len(snaps))
 	for _, s := range snaps {
-		if v, ok := parseSnapshot(s); ok {
-			samples = append(samples, v)
-		}
-	}
-	if len(samples) < 2 {
-		// One point is not a rate. Extrapolating from it would be invention.
-		slog.Debug("morpho-blue: vault dropped, fewer than 2 usable snapshots", "vault", id, "usable", len(samples))
-		return 0, false
-	}
-
-	// The query orders newest-first, but ordering is the server's promise, not
-	// ours: pick the extremes explicitly. Widest window inside MaxWindow wins,
-	// because 24h of drift is far less noisy than 6h.
-	newest := samples[0]
-	for _, s := range samples {
-		if s.at.After(newest.at) {
-			newest = s
-		}
-	}
-	var oldest morphoSample
-	for _, s := range samples {
-		if !s.at.Before(newest.at) || newest.at.Sub(s.at) > m.MaxWindow {
+		price := bigIntFromString(s.SharePriceScaled)
+		ts := bigIntFromString(s.Timestamp)
+		if price == nil || price.Sign() <= 0 || ts == nil || ts.Sign() <= 0 {
 			continue
 		}
-		if oldest.price == nil || s.at.Before(oldest.at) {
-			oldest = s
-		}
+		samples = append(samples, GrowthSample{At: time.Unix(ts.Int64(), 0).UTC(), Value: price})
 	}
-	if oldest.price == nil {
-		slog.Debug("morpho-blue: vault dropped, no second snapshot inside max window",
-			"vault", id, "max", m.MaxWindow)
-		return 0, false
-	}
-
-	elapsed := newest.at.Sub(oldest.at)
-	if elapsed < m.MinWindow {
-		// Annualizing a few minutes of share-price movement produces wild numbers.
-		slog.Debug("morpho-blue: vault dropped, sampling window too short",
-			"vault", id, "elapsed", elapsed, "min", m.MinWindow)
-		return 0, false
-	}
-	if newest.price.Cmp(oldest.price) < 0 {
-		// Share price should never fall. Either the vault took a loss or our
-		// math is wrong; we do not route into it under either explanation.
-		slog.Warn("morpho-blue: vault dropped, share price fell",
-			"vault", id, "before", oldest.price, "after", newest.price, "elapsed", elapsed)
-		return 0, false
-	}
-	apy := SharePriceGrowthToAPY(oldest.price, newest.price, elapsed)
-	if apy <= 0 {
-		return 0, false
-	}
-	return apy, true
-}
-
-type morphoSample struct {
-	at    time.Time
-	price *big.Int
-}
-
-func parseSnapshot(s morphoSnapshot) (morphoSample, bool) {
-	price := bigIntFromString(s.SharePriceScaled)
-	ts := bigIntFromString(s.Timestamp)
-	if price == nil || price.Sign() <= 0 || ts == nil || ts.Sign() <= 0 {
-		return morphoSample{}, false
-	}
-	return morphoSample{at: time.Unix(ts.Int64(), 0).UTC(), price: price}, true
+	return AnnualizeGrowth("morpho-blue vault "+id, samples, m.MinWindow, m.MaxWindow)
 }
 
 func init() {
-	Register(func(chain string) ProtocolAdapter {
-		return NewMorphoBlue(chain,
-			config.GetEnv("MORPHO_SUBGRAPH_ID", ""),
+	Register(func(c Chain) ProtocolAdapter {
+		return NewMorphoBlue(c.Label,
+			SubgraphID("MORPHO", c),
 			config.GetEnvDuration("MORPHO_MIN_WINDOW", DefaultMorphoMinWindow),
 			config.GetEnvDuration("MORPHO_MAX_WINDOW", DefaultMorphoMaxWindow),
 		)

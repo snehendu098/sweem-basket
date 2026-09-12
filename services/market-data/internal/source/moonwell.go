@@ -4,12 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/snehendu098/sweem-basket/internal/shared/config"
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
-
-// MoonwellBaseSubgraphID is the live Moonwell Base deployment (Messari lending schema).
-const MoonwellBaseSubgraphID = "33ex1ExmYQtwGVwri1AP3oMFPGSce6YbocBP7fWbsBrg"
 
 // Moonwell maps the Messari lending `Market` entity onto our Venue model.
 //
@@ -27,10 +23,9 @@ type Moonwell struct {
 	MaxMarkets int
 }
 
+// NewMoonwell takes the subgraph id for one chain; see NewAaveV3 on why an
+// unset id is never defaulted.
 func NewMoonwell(chain, subgraphID string) *Moonwell {
-	// Deliberately no fallback to MoonwellBaseSubgraphID: that is a Base *mainnet*
-	// deployment, and substituting it when unconfigured serves venues from the
-	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &Moonwell{Chain: chain, ID: subgraphID, MaxMarkets: 100}
 }
 
@@ -85,7 +80,8 @@ func (m *Moonwell) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 			}
 		}
 		tvl := parseDecimal(mk.TotalDepositBalanceUSD)
-		if !mk.IsActive || apy <= 0 || tvl <= 0 {
+		// Zero APY is left to Filter, per chain.
+		if !mk.IsActive || apy < 0 || tvl <= 0 {
 			continue
 		}
 		asset := ResolveAsset([]string{mk.InputToken.ID}, mk.InputToken.Symbol)
@@ -109,10 +105,7 @@ func (m *Moonwell) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 }
 
 func init() {
-	Register(func(chain string) ProtocolAdapter {
-		// No default: the constant above is a Base *mainnet* ID, and falling back
-		// to it on another chain silently serves venues from the wrong network
-		// rather than failing. Unset means unconfigured, same as morpho.
-		return NewMoonwell(chain, config.GetEnv("MOONWELL_SUBGRAPH_ID", ""))
+	Register(func(c Chain) ProtocolAdapter {
+		return NewMoonwell(c.Label, SubgraphID("MOONWELL", c))
 	})
 }

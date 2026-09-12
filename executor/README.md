@@ -12,9 +12,22 @@ Two independent limits bound what can happen:
 
 1. **Privy's server-side policy engine** — enforced by Privy, outside this process.
 2. **The local venue allowlist** (`venues.json`) — enforced here.
+3. **The local swap-path allowlist** (`swaps.json`) — enforced here.
+
+## Endpoints
+
+| method | path | purpose |
+|---|---|---|
+| `GET`  | `/health` | Privy reachability, venue count, chains served |
+| `GET`  | `/venues` | the allowlist, optionally `?chain_id=`. Read-only. The wallet service filters its routing against it so it never proposes a venue that would be refused at submission time. |
+| `POST` | `/route` | the only write path |
 
 ## Security model
 
+- A swap path absent from `swaps.json` is refused, and a swap is never submitted
+  without a live QuoterV2 quote: `amountOutMinimum` is always
+  `quoted * (10_000 - slippage_bps) / 10_000`, never 0. The caller's
+  `max_slippage_bps` is clamped server-side to 10..=300 (default 50).
 - A venue ID absent from `venues.json` is refused. No calldata is ever built for
   an address that did not come from the registry.
 - `to` on every transaction comes from the registry, never from the request body.
@@ -23,6 +36,11 @@ Two independent limits bound what can happen:
   **venue** contract. Tested (`approve_targets_the_asset_not_the_vault`).
 - Withdraw and redeem pay out to the user's own wallet address only
   (`withdraw_pays_out_to_the_owner`).
+- Every request must name `chain_id`, and every venue it references must live on
+  that chain. A Sepolia venue on a mainnet request (or the reverse) is refused
+  before any calldata exists (`venue_from_another_chain_is_refused`).
+- A venue id whose chain label disagrees with its `chain_id` makes the process
+  refuse to start, so the allowlist cannot be quietly mislabelled.
 - A cross-chain rebalance is refused rather than half-executed.
 - `amount_usd <= 0` is refused before anything is signed.
 - USD → token units is only correct for USD-pegged assets; anything else is
@@ -37,7 +55,9 @@ Two independent limits bound what can happen:
 | `PRIVY_AUTHORIZATION_PRIVATE_KEY` | no | — (unsigned requests) |
 | `EXECUTOR_ADDR`     | no       | `0.0.0.0:8082` |
 | `VENUES_PATH`       | no       | `venues.json`  |
-| `BASE_RPC_URL`      | no       | `https://sepolia.base.org` |
+| `SWAPS_PATH`        | no       | `swaps.json`   |
+| `BASE_RPC_URL_8453`  | no      | `https://mainnet.base.org` |
+| `BASE_RPC_URL_84532` | no      | `https://sepolia.base.org` |
 | `RECEIPT_TIMEOUT`   | no       | `60` (seconds) |
 
 `.env` then `../.env` are read as a fallback; real environment variables always
@@ -214,21 +234,70 @@ byte-for-byte against `@privy-io/node@0.34.0`, `src/lib/authorization.ts`.
 that SDK, so a serialization regression fails the test suite rather than
 production.
 
-## venues.json — address sources
+## venues.json — generated, not hand-written
 
-All **Base Sepolia (chain id 84532)**. Every address below was verified by an
-`eth_call` against `https://sepolia.base.org`, not copied from memory. The Base
-mainnet allowlist this replaced is in git history.
+The allowlist is produced by `services/market-data/cmd/gen-venues` from indexed
+data plus on-chain verification, and committed:
 
-| field | address | source |
+```
+go run ./services/market-data/cmd/gen-venues -out executor/venues.json   # from the repo root
+go run ./services/market-data/cmd/gen-venues -dry-run                    # print, write nothing
+```
+
+It is a **build-time** tool. The executor never fetches its allowlist at
+runtime: the security property is that the set of addresses it will call cannot
+be influenced by the request path, or by a compromised indexer. A human reads
+the diff; the file ships inside the image.
+
+A venue is emitted only when all of these hold — encodable (its protocol maps to
+a `VenueKind` implemented here), priceable (verified Chainlink feed for the
+underlying on that chain), liquid (clears the TVL floor), verified on chain
+(`symbol()`, `decimals()`, plus Aave's `getReservesList()` / Comet's
+`baseToken()` / ERC-4626's `asset()` / Moonwell's `isMToken()` + `underlying()`),
+and its id equals what market-data's `MakeID` produces. Everything else is
+skipped with a printed reason, which is how you find out that an asset needs a
+price feed or a new `VenueKind`.
+
+The file carries a `_generated` block with the time and command; a bare JSON
+array still loads, for a hand-written file behind `VENUES_PATH` in a test.
+
+Aave's reserve id shape is read from the subgraph, never reconstructed: upstream
+it is `underlying + addressesProvider` (the Pool then comes from that provider's
+`getPool()`), while our own deployment keys reserves by the underlying alone and
+carries the Pool as a field. Either way the Pool is proved by
+`getReservesList()` before the venue is emitted.
+
+### Moonwell (`ctoken`) — verified on Base, read-only, no transaction sent
+
+| check | result |
+|---|---|
+| `isMToken()` on `0xEdc817A2…` (mUSDC) | `true`; `underlying()` → mainnet USDC, `symbol()` → `mUSDC` |
+| `mint(uint256)` selector | `0xa0712d68`, pinned in `ctoken_selectors_are_canonical` |
+| `redeemUnderlying(uint256)` selector | `0x852a12e3`, pinned in the same test |
+| approval spender | the mToken itself — `mint` from an account with no allowance reverts inside USDC with `ERC20: transfer amount exceeds allowance`, i.e. it pulls with `transferFrom(msg.sender, mToken, amount)`. No comptroller approval exists. |
+| recipient parameter | **none**, and no `mintTo`-style variant on the deployed contract. `mint`/`redeemUnderlying` credit `msg.sender`, which is correct only because the executor sends from the user's own wallet. Unlike ERC-4626/Aave/Comet, the destination is *not* assertable from the calldata. |
+
+**Failures are return values, not reverts.** `redeemUnderlying(1e6)` from an
+account with no position returns `9` (MATH_ERROR) in a transaction that
+*succeeds*. Receipt status alone would book that as a confirmed withdrawal of
+money that never moved — the worst bug available in this system. Some failures
+do revert (`mint` on the paused mwrsETH market reverts with `mint is paused`; a
+missing allowance reverts inside USDC), so the shape is inconsistent and cannot
+be relied on either way.
+
+So every `ctoken` call carries an expected success event and is only believed
+when the receipt contains it:
+
+| event | topic0 | confirmed against |
 |---|---|---|
-| USDC (asset, USDC entry) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Circle's canonical testnet USDC. `symbol()` → `USDC`, `decimals()` → `6`. Both Base Sepolia venues use this same token. |
-| WETH (asset, WETH entry) | `0x4200000000000000000000000000000000000006` | Same predeploy address as mainnet, 18 decimals. |
-| Aave V3 Base Sepolia **Pool** | `0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b` | `Pool.ADDRESSES_PROVIDER()` → `0xd449fed49d9c443688d6816fe6872f21402e41de`, which is the provider half of the subgraph reserve id. Market has exactly two reserves: USDC (aToken `aBasSepUSDC` `0xf53B60F4006cab2b3C4688ce41fD5362427A2A66`) and WETH. |
+| `Mint(address,uint256,uint256)` | `0x4c209b5f…21c4f` | live logs on mUSDC |
+| `Redeem(address,uint256,uint256)` | `0xe5b754fb…1a929` | live logs on mUSDC |
 
-| Compound III **Comet** (`cUSDCv3`) | `0x571621Ce60Cebb0c1D442B5afb38B1663C6Bf017` | Proxy; delegates to the Comet implementation. `name()` → `Compound USDC`, `baseToken()` → the testnet USDC above, `decimals()` → `6`, `getUtilization()` returns live utilisation. |
-
-Moonwell, Euler and Spark have no code on Base Sepolia at all.
+A mined `ctoken` call with no such event is reported `failed`, with a reason
+saying the venue returned a failure code instead of reverting
+(`a_mined_ctoken_call_without_its_event_is_a_failure`). This is also why a
+ctoken call is confirmed even when it is the last in the sequence, where every
+other kind is only submitted.
 
 #### Comet call shapes, verified on the deployed contract
 
@@ -299,3 +368,28 @@ variant and one match arm in `src/venues.rs`.
 - `src/privy.rs` — Privy wallet RPC client (signing only).
 - `src/auth.rs` — Privy authorization signatures over the canonical payload.
 - `src/rpc.rs` — read-only JSON-RPC receipt polling.
+
+## swaps.json — the swap-path allowlist
+
+A deposit into an asset that is not USDC buys it on Uniswap v3 first, then
+supplies it if a venue holds that asset. The sequence is
+`approve(router) → swap → approve(venue) → supply`, and the swap's `recipient` is
+the user's own wallet — the output never lands in a contract this service
+controls.
+
+Paths are static and come only from this file. They were chosen by measuring
+price impact on chain: the direct USDC pools for cbETH and wstETH are
+effectively dead (-15.5% and -78.4% at $1,000), so those route through WETH,
+while WETH and cbBTC are single-hop. Sizing is on the **input**: `amount_usd` is
+USDC, and the quote decides how much of the output asset that buys.
+
+| field | meaning |
+|---|---|
+| `from` / `to` | asset symbols; with `chain_id` they form the lookup key |
+| `router` | SwapRouter02, also the approval spender |
+| `quoter` | QuoterV2, called read-only over `eth_call` |
+| `hops` | ordered; each is the token coming out of a pool plus its fee tier in hundredths of a bip. One hop uses `exactInputSingle`, more use `exactInput` with the packed path |
+
+A withdrawal or rebalance of a non-USD asset is still refused: nothing sizes a
+USD figure into an amount of WETH on the way *out*, and the swap leg only solves
+the way in.

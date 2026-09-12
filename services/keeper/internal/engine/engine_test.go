@@ -75,7 +75,7 @@ type fakeCost struct {
 	err error
 }
 
-func (f fakeCost) CostUSD(context.Context) (float64, error) { return f.usd, f.err }
+func (f fakeCost) CostUSD(context.Context, int) (float64, error) { return f.usd, f.err }
 
 type fakeReceipts struct {
 	byHash map[string]*rpc.Receipt
@@ -83,7 +83,7 @@ type fakeReceipts struct {
 	calls  int
 }
 
-func (f *fakeReceipts) TransactionReceipt(_ context.Context, h string) (*rpc.Receipt, error) {
+func (f *fakeReceipts) TransactionReceipt(_ context.Context, _ int, h string) (*rpc.Receipt, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
@@ -141,14 +141,14 @@ func newEngine(s *fakeStore, m *fakeMarket, w *fakeWallet) *Engine {
 
 func fixtures() (*fakeStore, *fakeMarket, *fakeWallet) {
 	s := &fakeStore{
-		subs: []store.Subscription{{UserID: "u1", PrivyDID: "did:privy:u1", BasketID: "b1", Chain: "Base"}},
+		subs: []store.Subscription{{UserID: "u1", PrivyDID: "did:privy:u1", BasketID: "b1", Chain: "base"}},
 		positions: map[string][]store.Position{
-			"u1|b1": {{Asset: "USDC", VenueID: "Base:aave-v3:pool", Chain: "Base", AmountUSD: 5000, EntryAPY: 3}},
+			"u1|b1": {{Asset: "USDC", VenueID: "base:aave-v3:pool", Chain: "base", AmountUSD: 5000, EntryAPY: 3}},
 		},
 	}
 	m := &fakeMarket{venues: []client.Venue{
-		{ID: "Base:aave-v3:pool", APYBase: 3, APY: 3},
-		{ID: "Base:moonwell:pool", APYBase: 6, APY: 6},
+		{ID: "base:aave-v3:pool", APYBase: 3, APY: 3},
+		{ID: "base:moonwell:pool", APYBase: 6, APY: 6},
 	}}
 	return s, m, &fakeWallet{}
 }
@@ -183,7 +183,7 @@ func TestPassDryRunCallsNothing(t *testing.T) {
 // good that venue's rate looks.
 func TestPassSkipsWhenAlreadyBest(t *testing.T) {
 	s, m, w := fixtures()
-	s.positions["u1|b1"][0].VenueID = "Base:moonwell:pool"
+	s.positions["u1|b1"][0].VenueID = "base:moonwell:pool"
 	st := newEngine(s, m, w).Pass(context.Background())
 
 	if st.LegsMoved != 0 || st.LegsSkipped[policy.ReasonSameVenue] != 1 {
@@ -199,8 +199,8 @@ func TestPassSkipsWhenAlreadyBest(t *testing.T) {
 func TestPassRanksOnDiscountedAPY(t *testing.T) {
 	s, m, w := fixtures()
 	m.venues = []client.Venue{
-		{ID: "Base:aave-v3:pool", APYBase: 3, APY: 3},
-		{ID: "Base:farm:pool", APYBase: 1, APYReward: 3, APY: 4},
+		{ID: "base:aave-v3:pool", APYBase: 3, APY: 3},
+		{ID: "base:farm:pool", APYBase: 1, APYReward: 3, APY: 4},
 	}
 	st := newEngine(s, m, w).Pass(context.Background())
 
@@ -213,9 +213,9 @@ func TestPassRanksOnDiscountedAPY(t *testing.T) {
 // spreading moves across them inside one pass.
 func TestPassRateLimitBudgetIsSharedAcrossBaskets(t *testing.T) {
 	s, m, w := fixtures()
-	s.subs = append(s.subs, store.Subscription{UserID: "u1", PrivyDID: "did:privy:u1", BasketID: "b2", Chain: "Base"})
+	s.subs = append(s.subs, store.Subscription{UserID: "u1", PrivyDID: "did:privy:u1", BasketID: "b2", Chain: "base"})
 	s.positions["u1|b2"] = []store.Position{
-		{Asset: "USDC", VenueID: "Base:aave-v3:pool", Chain: "Base", AmountUSD: 5000, EntryAPY: 3},
+		{Asset: "USDC", VenueID: "base:aave-v3:pool", Chain: "base", AmountUSD: 5000, EntryAPY: 3},
 	}
 	s.hist = store.History{LastMove: map[string]time.Time{}, MovesLast24h: 3} // one left
 
@@ -250,7 +250,7 @@ func TestPassRespectsHoldPeriod(t *testing.T) {
 func TestPassFallsBackToEntryAPY(t *testing.T) {
 	s, m, w := fixtures()
 	s.positions["u1|b1"][0].EntryAPY = 20
-	m.venues = []client.Venue{{ID: "Base:other:pool", APYBase: 6, APY: 6}}
+	m.venues = []client.Venue{{ID: "base:other:pool", APYBase: 6, APY: 6}}
 	st := newEngine(s, m, w).Pass(context.Background())
 
 	if st.LegsMoved != 0 || st.LegsSkipped[policy.ReasonDriftFloor] != 1 {
@@ -266,7 +266,8 @@ func TestPassSkipsWhenCostUnavailable(t *testing.T) {
 	e.Cost = fakeCost{err: errors.New("rpc down")}
 	st := e.Pass(context.Background())
 
-	if st.LegsEvaluated != 0 || st.LegsMoved != 0 || len(w.calls) != 0 {
+	// The leg is seen but decided on nothing: no move, no call to the wallet.
+	if st.LegsMoved != 0 || len(w.calls) != 0 {
 		t.Fatalf("stats %+v calls %v", st, w.calls)
 	}
 	if st.LegsSkipped[SkipReasonCostUnavailable] != 1 || st.Errors != 1 {
@@ -283,10 +284,56 @@ func TestPassUsesLiveCost(t *testing.T) {
 	e.Cost = fakeCost{usd: 200}
 	st := e.Pass(context.Background())
 
-	if st.GasCostUSD != 200 {
+	if st.GasCostUSD["base"] != 200 {
 		t.Fatalf("cost %v", st.GasCostUSD)
 	}
 	if st.LegsMoved != 0 || st.LegsSkipped[policy.ReasonNotWorthGas] != 1 {
 		t.Fatalf("stats %+v", st)
 	}
+}
+
+// A position naming a chain this backend does not serve is skipped loudly. The
+// alternative — pricing and routing it against whichever chain happens to be
+// configured — puts money on the wrong network.
+func TestPassSkipsPositionsOnAnUnknownChain(t *testing.T) {
+	s, m, w := fixtures()
+	s.positions["u1|b1"] = []store.Position{
+		{Asset: "USDC", VenueID: "arbitrum:aave-v3:pool", Chain: "arbitrum", AmountUSD: 5000, EntryAPY: 3},
+	}
+	e := newEngine(s, m, w)
+	st := e.Pass(context.Background())
+
+	if st.LegsSkipped[SkipReasonUnknownChain] != 1 {
+		t.Fatalf("stats %+v", st)
+	}
+	if st.LegsMoved != 0 || len(w.calls) != 0 {
+		t.Fatalf("moved money on an unknown chain: %+v %v", st, w.calls)
+	}
+}
+
+// Each chain is priced on its own estimator: a leg is never costed with the
+// other chain's gas.
+func TestPassPricesEachChainSeparately(t *testing.T) {
+	s, m, w := fixtures()
+	s.positions["u1|b1"] = []store.Position{
+		{Asset: "USDC", VenueID: "base:aave-v3:pool", Chain: "base", AmountUSD: 5000, EntryAPY: 3},
+		{Asset: "USDC", VenueID: "base-sepolia:aave-v3:pool", Chain: "base-sepolia", AmountUSD: 5000, EntryAPY: 3},
+	}
+	e := newEngine(s, m, w)
+	e.Cost = perChainCost{8453: 0.5, 84532: 0.25}
+	st := e.Pass(context.Background())
+
+	if st.GasCostUSD["base"] != 0.5 || st.GasCostUSD["base-sepolia"] != 0.25 {
+		t.Fatalf("per-chain cost = %v", st.GasCostUSD)
+	}
+}
+
+type perChainCost map[int]float64
+
+func (p perChainCost) CostUSD(_ context.Context, chainID int) (float64, error) {
+	usd, ok := p[chainID]
+	if !ok {
+		return 0, errors.New("no estimator for chain")
+	}
+	return usd, nil
 }

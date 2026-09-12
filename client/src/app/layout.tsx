@@ -1,35 +1,33 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
+import { ChainProvider } from "@/lib/chain";
 import { SessionProvider } from "@/lib/session";
-import { Nav } from "@/components/ui";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const poppins = Poppins({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+  // Only the weights the UI actually uses: body 400, font-medium, -semibold
+  // and -bold. Loading 100–900 shipped six faces nothing referenced.
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
-  title: "Basket — non-custodial yield baskets",
-  description:
-    "Subscribe to a yield basket. Funds never leave your own wallet; a bounded delegated signer follows the weights for you.",
+  title: "sweem",
+  description: "Non-custodial yield baskets on Base.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // One theme. `dark` is what makes shadcn's dark: variants resolve.
+      className={`dark ${poppins.variable} h-full`}
     >
-      <body className="min-h-full flex flex-col">
-        <SessionProvider>
-          <Nav />
-          <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8">
-            {children}
-          </main>
-          <footer className="border-t border-zinc-800 px-5 py-4 text-center text-xs text-zinc-600">
-            Funds stay in your own Privy embedded wallet. Delegation is
-            revocable at any time.
-          </footer>
-        </SessionProvider>
+      <body className={`${poppins.className} min-h-full bg-background text-foreground antialiased`}>
+        <ChainProvider>
+          <SessionProvider>{children}</SessionProvider>
+        </ChainProvider>
       </body>
     </html>
   );

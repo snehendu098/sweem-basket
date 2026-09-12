@@ -1,0 +1,18 @@
+{
+  "name": "sweem",
+  "version": "0.1.0",
+  "description": "Unified lending-venue subgraph: Aave V3 + Compound III + MetaMorpho, normalized into one Venue entity",
+  "license": "MIT",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build --network base-sepolia",
+    "build:base": "graph build --network base",
+    "deploy": "graph deploy sweem-base-sepolia --network base-sepolia",
+    "deploy:base": "graph deploy sweem-base --network base",
+    "check": "bun scripts/apy-check.mjs"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.97.1",
+    "@graphprotocol/graph-ts": "0.38.1"
+  }
+}

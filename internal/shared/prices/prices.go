@@ -410,3 +410,91 @@ func (r *HTTPRPC) Call(ctx context.Context, to, data string) (string, error) {
 	}
 	return out.Result, nil
 }
+
+// --- batching ---
+
+// Call is one eth_call in a batch.
+type Call struct{ To, Data string }
+
+// Result is one answer from a batch: either a return value or the reason there
+// is none. A failed item never comes back as an empty string that a caller
+// could mistake for a zero.
+type Result struct {
+	Raw string
+	Err error
+}
+
+// Batcher is an RPC that can answer several eth_calls in one round trip.
+//
+// It exists because public Base endpoints rate-limit per REQUEST, not per call:
+// reading fifteen Aave reserves as fifteen POSTs earns 429s, and reading them
+// as one POST does not. An RPC that cannot batch simply does not implement
+// this, and callers fall back to one call at a time.
+type Batcher interface {
+	CallBatch(ctx context.Context, calls []Call) ([]Result, error)
+}
+
+// CallBatch sends a JSON-RPC batch. The returned slice is index-aligned with
+// calls, whatever order the node answers in.
+//
+// A transport-level failure returns an error for the whole batch, because that
+// is what it is; a per-call revert or rate limit lands in that call's Result.
+func (r *HTTPRPC) CallBatch(ctx context.Context, calls []Call) ([]Result, error) {
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	reqs := make([]map[string]any, len(calls))
+	for i, c := range calls {
+		reqs[i] = map[string]any{
+			"jsonrpc": "2.0",
+			"id":      i,
+			"method":  "eth_call",
+			"params":  []any{map[string]string{"to": c.To, "data": c.Data}, "latest"},
+		}
+	}
+	body, err := json.Marshal(reqs)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("eth_call batch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("eth_call batch: status %d", resp.StatusCode)
+	}
+
+	var out []struct {
+		ID     int    `json:"id"`
+		Result string `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("eth_call batch: decode: %w", err)
+	}
+
+	results := make([]Result, len(calls))
+	for i := range results {
+		results[i] = Result{Err: errors.New("eth_call batch: no answer for this call")}
+	}
+	for _, o := range out {
+		if o.ID < 0 || o.ID >= len(results) {
+			continue // a node answering an id we did not ask for is not evidence about anything
+		}
+		if o.Error != nil {
+			results[o.ID] = Result{Err: fmt.Errorf("eth_call: %s", o.Error.Message)}
+			continue
+		}
+		results[o.ID] = Result{Raw: o.Result}
+	}
+	return results, nil
+}

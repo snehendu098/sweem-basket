@@ -1,8 +1,53 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-geist-sans);
+  --font-heading: var(--font-geist-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-positive: var(--positive);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 html {
@@ -10,12 +55,85 @@ html {
 }
 
 body {
-  background: #09090b;
-  color: #e4e4e7;
+  background: var(--background);
+  color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-/* Dense financial tables read better with tabular numerals. */
+/* The carousel scrolls horizontally; a native bar under it just adds noise. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Figures line up without switching typeface: Poppins everywhere, tabular digits. */
+.tnum,
 .font-mono {
   font-variant-numeric: tabular-nums;
+}
+
+:root {
+  color-scheme: dark;
+  /* Soft dark ground. Panels lift only slightly off it; borders are hairlines. */
+  --background: #101010;
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.225 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  /* sweem lime, sampled from the logo. The one saturated colour in the app:
+     primary action and the Connect pill.
+
+     Its foreground is near-black on purpose. #c4f56a has a relative luminance
+     of 0.781 — 1.26:1 against white, which is unreadable, and 14.9:1 against
+     #101010. Anywhere lime becomes a surface, the text on it is dark. Lime as
+     text on the dark ground is the other way round and fine. */
+  --primary: #c4f56a;
+  --primary-foreground: #101010;
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.245 0 0);
+  --muted-foreground: oklch(0.66 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.63 0.15 25);
+  /* Cooled from 158 to 190: a leaf green sitting beside lime reads as a
+     washed-out primary, and an APY figure must not look like a button. */
+  --positive: oklch(0.76 0.1 190);
+  --warning: oklch(0.76 0.1 80);
+  --border: oklch(1 0 0 / 6%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: #c4f56a;
+  --chart-1: oklch(0.76 0.1 190);
+  --chart-2: oklch(0.66 0 0);
+  --chart-3: oklch(0.5 0 0);
+  --chart-4: oklch(0.38 0 0);
+  --chart-5: oklch(0.28 0 0);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: #c4f56a;
+  --sidebar-primary-foreground: #101010;
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --sidebar-ring: #c4f56a;
+}
+
+/* One theme only: the tokens live in :root and <html> carries `dark` so
+   shadcn's dark: variants resolve. */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
 }

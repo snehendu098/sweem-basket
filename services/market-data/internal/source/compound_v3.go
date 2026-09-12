@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
-	"github.com/snehendu098/sweem-basket/internal/shared/config"
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
-
-// CompoundV3BaseSubgraphID is the live Compound III (Comet) Base deployment.
-const CompoundV3BaseSubgraphID = "2hcXhs36pTBDVUmk5K2Zkr6N4UYGwaHuco2a6jyTsijo"
 
 // CompoundV3 maps Comet's `Market` + `MarketAccounting` onto our Venue model.
 //
@@ -29,10 +26,9 @@ type CompoundV3 struct {
 	MaxMarkets int
 }
 
+// NewCompoundV3 takes the subgraph id for one chain; see NewAaveV3 on why an
+// unset id is never defaulted.
 func NewCompoundV3(chain, subgraphID string) *CompoundV3 {
-	// Deliberately no fallback to CompoundV3BaseSubgraphID: that is a Base *mainnet*
-	// deployment, and substituting it when unconfigured serves venues from the
-	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &CompoundV3{Chain: chain, ID: subgraphID, MaxMarkets: 50}
 }
 
@@ -87,17 +83,22 @@ func (c *CompoundV3) Map(_ *Pricer, raw json.RawMessage) ([]venue.Venue, error) 
 		apy := APRToAPY(net)
 		apyBase := APRToAPY(base)
 		tvl := parseDecimal(mk.Accounting.TotalBaseSupplyUsd)
-		if apy <= 0 || tvl <= 0 {
+		// Zero APY is left to Filter: on a testnet a market pays 0% because
+		// nobody borrows, which is idle, not broken.
+		if apy < 0 || tvl <= 0 {
 			continue
 		}
 		tok := mk.Configuration.BaseToken.Token
 		asset := ResolveAsset([]string{tok.Address}, tok.Symbol)
+		// Lowercased for the same reason as the Aave reserve id: it is the key
+		// the allowlist and the direct-RPC source match on.
+		poolID := strings.ToLower(mk.ID)
 		out = append(out, venue.Venue{
-			ID:         venue.MakeID(c.Chain, c.Protocol(), mk.ID),
+			ID:         venue.MakeID(c.Chain, c.Protocol(), poolID),
 			Chain:      c.Chain,
 			Project:    c.Protocol(),
 			Symbol:     mk.Configuration.Symbol,
-			PoolID:     mk.ID,
+			PoolID:     poolID,
 			Asset:      asset,
 			TVLUsd:     tvl,
 			APY:        apy,
@@ -120,10 +121,7 @@ func parseDecimal(s string) float64 {
 }
 
 func init() {
-	Register(func(chain string) ProtocolAdapter {
-		// No default: the constant above is a Base *mainnet* ID, and falling back
-		// to it on another chain silently serves venues from the wrong network
-		// rather than failing. Unset means unconfigured, same as morpho.
-		return NewCompoundV3(chain, config.GetEnv("COMPOUND_V3_SUBGRAPH_ID", ""))
+	Register(func(c Chain) ProtocolAdapter {
+		return NewCompoundV3(c.Label, SubgraphID("COMPOUND_V3", c))
 	})
 }

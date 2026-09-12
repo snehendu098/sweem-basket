@@ -1,4 +1,8 @@
-use std::{env, time::Duration};
+use std::{collections::HashMap, env, time::Duration};
+
+/// Chains this executor serves. Both at once: the frontend offers a network
+/// toggle, so the chain is a property of a request, never of the process.
+pub const CHAIN_IDS: [u64; 2] = [8453, 84532];
 
 /// Runtime configuration. Every field is required except `addr` — the executor
 /// signs transactions, so it refuses to start half-configured rather than
@@ -15,9 +19,15 @@ pub struct Config {
     /// Path to the venue allowlist. This file is the security boundary: the
     /// executor will only ever build calldata for venues listed here.
     pub venues_path: String,
-    /// Read-only JSON-RPC node, used to wait for receipts between the calls of
-    /// a sequence. Privy's wallet API only signs; it cannot read receipts.
-    pub rpc_url: String,
+    /// Path to the swap-path allowlist. Same boundary as `venues_path`: the
+    /// executor will only ever swap along a path listed here.
+    pub swaps_path: String,
+    /// Read-only JSON-RPC node per chain, used to wait for receipts between the
+    /// calls of a sequence. Privy's wallet API only signs; it cannot read
+    /// receipts. There is deliberately no shared default across chains: polling
+    /// the wrong network for a receipt never confirms and never fails, it just
+    /// times out and reports a real transaction as pending.
+    pub rpc_urls: HashMap<u64, String>,
     /// How long to wait for a receipt before reporting the step as pending.
     pub receipt_timeout: Duration,
 }
@@ -34,7 +44,8 @@ impl std::fmt::Debug for Config {
                 &self.privy_authorization_key.as_ref().map(|_| "<redacted>"),
             )
             .field("venues_path", &self.venues_path)
-            .field("rpc_url", &self.rpc_url)
+            .field("swaps_path", &self.swaps_path)
+            .field("rpc_urls", &self.rpc_urls)
             .field("receipt_timeout", &self.receipt_timeout)
             .finish()
     }
@@ -52,10 +63,8 @@ impl Config {
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
             venues_path: env::var("VENUES_PATH").unwrap_or_else(|_| "venues.json".into()),
-            // Base Sepolia is the deployment target; the public endpoint
-            // rate-limits and caps eth_getLogs at 10k blocks.
-            rpc_url: env::var("BASE_RPC_URL")
-                .unwrap_or_else(|_| "https://sepolia.base.org".into()),
+            swaps_path: env::var("SWAPS_PATH").unwrap_or_else(|_| "swaps.json".into()),
+            rpc_urls: CHAIN_IDS.iter().map(|&id| (id, rpc_url(id))).collect(),
             receipt_timeout: Duration::from_secs(
                 env::var("RECEIPT_TIMEOUT")
                     .ok()
@@ -64,6 +73,19 @@ impl Config {
             ),
         })
     }
+}
+
+/// Per-chain node URL. The public endpoints rate-limit and cap eth_getLogs at
+/// 10k blocks, which is fine for receipt polling.
+fn rpc_url(chain_id: u64) -> String {
+    let default = match chain_id {
+        84532 => "https://sepolia.base.org",
+        _ => "https://mainnet.base.org",
+    };
+    env::var(format!("BASE_RPC_URL_{chain_id}"))
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| default.into())
 }
 
 fn require(key: &str) -> Result<String, String> {

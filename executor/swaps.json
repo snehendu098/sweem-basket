@@ -1,0 +1,149 @@
+{
+  "_note": "Uniswap v3 swap-path allowlist. Same security boundary as venues.json: a path absent from this file is refused. Paths are static and were chosen by measuring price impact on chain - direct USDC pools for cbETH (-15.5% at $1k) and wstETH (-78.4% at $1k) are effectively dead, so those route through WETH. Fees are hundredths of a bip: 500 = 0.05%. Exits are the same hops reversed, quoted live with QuoterV2: WETH->USDC -0.0018%, cbBTC->USDC +0.0025%, wstETH->USDC -0.0034%, cbETH->USDC -0.0073% at $1,000. A hold venue you can enter and cannot leave is worse than no venue, so every entry path has its exit.",
+  "paths": [
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "WETH",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "cbBTC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 8,
+      "hops": [
+        {
+          "token": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "wstETH",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
+          "fee": 100
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "cbETH",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "WETH",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x4200000000000000000000000000000000000006",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "cbBTC",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+      "token_in_decimals": 8,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "wstETH",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 100
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "cbETH",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    }
+  ]
+}

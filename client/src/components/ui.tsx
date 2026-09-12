@@ -1,231 +1,327 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { basescanTx, fmtUsd, shortHash } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { basescanTx, displayAsset, fmtUsd, shortHash } from "@/lib/api";
+import { TokenIcon } from "@/components/TokenIcon";
+import { cn } from "@/lib/utils";
 import type { LegResult, LegStatus, SettleResult, Step } from "@/lib/types";
+
+/**
+ * Open state plus dismissal for every popover in the app: the settings menu,
+ * the wallet menu and Picker all use this one implementation. Attach `ref` to
+ * the wrapping element — a click outside it, or Escape, closes.
+ */
+export function useDismissable() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return { open, setOpen, ref };
+}
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-zinc-500">
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
-      {label ?? "Loading…"}
-    </div>
+    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+      <span className="size-3 animate-spin rounded-full border-2 border-border border-t-foreground/70" />
+      {label}
+    </span>
   );
 }
 
-export function ErrorBox({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry?: () => void;
-}) {
+export function ErrorBox({ message }: { message: string }) {
   return (
-    <div className="rounded border border-red-900/60 bg-red-950/30 p-3 text-sm text-red-300">
-      <div className="font-medium">Request failed</div>
-      <div className="mt-1 break-words text-red-400/90">{message}</div>
-      {onRetry && (
-        <button
-          onClick={onRetry}
-          className="mt-2 rounded border border-red-800 px-2 py-1 text-xs text-red-200 hover:bg-red-900/40"
-        >
-          Retry
-        </button>
-      )}
-    </div>
+    <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs break-words text-destructive">
+      {message}
+    </p>
   );
 }
 
-export function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">
-      {children}
-    </div>
-  );
-}
-
-export function Panel({
-  title,
-  right,
-  children,
-  className = "",
-}: {
-  title?: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <section
-      className={`rounded-lg border border-zinc-800 bg-zinc-900/40 ${className}`}
-    >
-      {title && (
-        <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            {title}
-          </h2>
-          {right}
-        </header>
-      )}
-      <div className="p-4">{children}</div>
-    </section>
-  );
-}
-
-export function Stat({
-  label,
-  value,
-  sub,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "default" | "good" | "warn";
-}) {
-  const color =
-    tone === "good"
-      ? "text-emerald-400"
-      : tone === "warn"
-        ? "text-amber-400"
-        : "text-zinc-100";
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-zinc-500">
-        {label}
-      </div>
-      <div className={`mt-1 font-mono text-xl ${color}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-zinc-500">{sub}</div>}
-    </div>
-  );
-}
-
+/** Modest radius everywhere. The only pills are the nav Connect button and the token picker. */
 export function Button({
   children,
   variant = "primary",
   className = "",
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "ghost" | "danger";
+  variant?: "primary" | "ghost";
 }) {
   const styles = {
     primary:
-      "bg-emerald-500 text-zinc-950 hover:bg-emerald-400 disabled:bg-zinc-700 disabled:text-zinc-400",
+      "bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-secondary disabled:text-muted-foreground",
     ghost:
-      "border border-zinc-700 text-zinc-200 hover:bg-zinc-800 disabled:text-zinc-600",
-    danger:
-      "border border-red-800 text-red-300 hover:bg-red-950/50 disabled:text-zinc-600",
+      "border border-border bg-secondary/40 text-foreground hover:bg-secondary disabled:text-muted-foreground",
   }[variant];
   return (
     <button
       {...rest}
-      className={`rounded px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed ${styles} ${className}`}
+      className={cn(
+        "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed",
+        styles,
+        className,
+      )}
     >
       {children}
     </button>
   );
 }
 
-const NAV = [
-  { href: "/explore", label: "Explore" },
-  { href: "/create", label: "Create" },
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/activity", label: "Activity" },
-];
-
-export function Nav() {
-  const path = usePathname();
-  const { ready, authenticated, login, logout, me, wallet } = useSession();
-
+/** One rounded surface. Rows inside are separated by hairlines, never boxes. */
+export function Panel({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center gap-6 px-5 py-3">
-        <Link href="/" className="font-semibold tracking-tight">
-          <span className="text-emerald-400">▮</span> Basket
-        </Link>
-        {authenticated && (
-          <nav className="flex gap-4 text-sm">
-            {NAV.map((n) => (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={
-                  path === n.href || path.startsWith(n.href + "/")
-                    ? "text-zinc-100"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }
-              >
-                {n.label}
-              </Link>
-            ))}
-          </nav>
-        )}
-        <div className="ml-auto flex items-center gap-3 text-sm">
-          {!ready ? (
-            <Spinner label="" />
-          ) : authenticated ? (
-            <>
-              <Link
-                href="/onboarding"
-                className={`rounded-full border px-2.5 py-1 text-xs ${
-                  me?.delegated
-                    ? "border-emerald-800 text-emerald-400"
-                    : "border-amber-800 text-amber-400"
-                }`}
-                title="Manage the permission you granted"
-              >
-                {me?.delegated ? "Delegated · revoke" : "Not delegated"}
-              </Link>
-              {wallet && (
-                <span className="hidden font-mono text-xs text-zinc-500 sm:inline">
-                  {shortHash(wallet.address)}
-                </span>
-              )}
-              <Button variant="ghost" onClick={() => void logout()}>
-                Log out
-              </Button>
-            </>
-          ) : (
-            <Button onClick={login}>Log in</Button>
-          )}
-        </div>
-      </div>
-    </header>
+    <div
+      className={cn(
+        "overflow-hidden rounded-2xl border border-border bg-card",
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
-/** Gate for pages that need a logged-in user with a bound backend record. */
-export function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated, login, me, meError, syncing, refreshMe } =
-    useSession();
+export const Divider = () => <div className="h-px bg-border" />;
 
-  if (!ready) return <Spinner label="Starting Privy…" />;
-  if (!authenticated) {
-    return (
-      <Panel title="Sign in required">
-        <p className="text-sm text-zinc-400">
-          Log in to create an embedded wallet and use the protocol.
-        </p>
-        <Button className="mt-3" onClick={login}>
-          Log in
-        </Button>
-      </Panel>
-    );
-  }
-  if (meError) return <ErrorBox message={meError} onRetry={() => void refreshMe()} />;
-  if (!me || syncing) return <Spinner label="Binding your wallet…" />;
-  return <>{children}</>;
+export function Label({ children }: { children: React.ReactNode }) {
+  return <span className="text-sm text-muted-foreground">{children}</span>;
 }
 
-// --- execution rendering: 207, pending, and null prices are first-class ---
+/**
+ * Replaces the native <select>: browsers paint their own chevron and a light
+ * popup that has nothing to do with this theme. Renders as a dark rounded pill.
+ */
+export function Picker<T extends string>({
+  value,
+  onChange,
+  options,
+  placeholder = "none",
+  disabled,
+  ariaLabel,
+  className,
+}: {
+  value: T | null;
+  onChange: (v: T) => void;
+  options: readonly { value: T; label: string; hint?: string }[];
+  placeholder?: string;
+  disabled?: boolean;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const { open, setOpen, ref } = useDismissable();
+
+  const current = options.find((o) => o.value === value);
+
+  return (
+    <div className={cn("relative shrink-0", className)} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled || options.length === 0}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className="inline-flex max-w-56 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-4 pr-3 text-sm font-medium transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:text-muted-foreground"
+      >
+        <span className="truncate">{current?.label ?? placeholder}</span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      {open && (
+        <ul className="absolute right-0 z-30 mt-2 max-h-72 w-60 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-xl">
+          {options.map((o) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-secondary/70"
+              >
+                <span className="truncate">{o.label}</span>
+                {o.hint && (
+                  <span className="ml-auto tnum text-xs text-positive">
+                    {o.hint}
+                  </span>
+                )}
+                {o.value === value && (
+                  <Check className={cn("size-4 text-foreground", o.hint ? "" : "ml-auto")} />
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Hover/focus tooltip. CSS only — no state, no positioning library, and it
+ * works on a control that is aria-disabled because the group is the wrapper,
+ * not the control. `title` carries the same text for touch and for anything
+ * that never sees :hover.
+ */
+export function Tooltip({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn("group relative inline-flex", className)} title={label}>
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden -translate-x-1/2 rounded-md border border-border bg-popover px-2 py-1 text-[11px] whitespace-nowrap text-foreground shadow-xl group-hover:block group-focus-within:block"
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
+export type MultiOption<T extends string> = {
+  value: T;
+  label: string;
+  hint?: string;
+  icon?: React.ReactNode;
+  /** Not selectable. `reason` is what the tooltip says about why. */
+  disabled?: boolean;
+  reason?: string;
+};
+
+/**
+ * Many-of-N in one control, for when a row of chips would wrap into a wall.
+ * Same popover mechanics as Picker — one useDismissable, one absolute list —
+ * so there is only ever one popover implementation in this app.
+ */
+export function MultiPicker<T extends string>({
+  values,
+  onToggle,
+  options,
+  placeholder = "Select tokens",
+  disabled,
+  ariaLabel,
+  className,
+}: {
+  values: readonly T[];
+  onToggle: (v: T) => void;
+  options: readonly MultiOption<T>[];
+  placeholder?: string;
+  disabled?: boolean;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const { open, setOpen, ref } = useDismissable();
+  const chosen = options.filter((o) => values.includes(o.value));
+
+  return (
+    <div className={cn("relative", className)} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled || options.length === 0}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:text-muted-foreground"
+      >
+        {chosen.length === 0 ? (
+          <span className="text-muted-foreground">{placeholder}</span>
+        ) : (
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {chosen.map((o) => (
+              <span
+                key={o.value}
+                className="inline-flex items-center gap-1.5 rounded-full bg-background px-2 py-0.5 text-xs font-medium"
+              >
+                {o.icon}
+                {o.label}
+              </span>
+            ))}
+          </span>
+        )}
+        <ChevronDown className="ml-auto size-4 shrink-0 text-muted-foreground" />
+      </button>
+      {open && (
+        <ul className="absolute left-0 right-0 z-30 mt-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-xl">
+          {options.map((o) => {
+            const on = values.includes(o.value);
+            const row = (
+              <button
+                type="button"
+                aria-disabled={o.disabled}
+                aria-pressed={on}
+                onClick={() => !o.disabled && onToggle(o.value)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                  o.disabled
+                    ? "cursor-not-allowed opacity-40"
+                    : "hover:bg-secondary/70",
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid size-4 shrink-0 place-items-center rounded border",
+                    on ? "border-foreground bg-foreground" : "border-border",
+                  )}
+                >
+                  {on && <Check className="size-3 text-background" />}
+                </span>
+                {o.icon}
+                <span className="truncate">{o.label}</span>
+                {o.hint && (
+                  <span className="tnum ml-auto text-xs text-positive">{o.hint}</span>
+                )}
+              </button>
+            );
+            return (
+              <li key={o.value}>
+                {o.disabled && o.reason ? (
+                  <Tooltip label={o.reason} className="w-full">
+                    {row}
+                  </Tooltip>
+                ) : (
+                  row
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// --- execution rendering: 207, pending and null prices are first-class ---
 
 const LEG_TONE: Record<LegStatus, string> = {
-  submitted: "border-emerald-800 bg-emerald-950/40 text-emerald-300",
-  pending: "border-amber-800 bg-amber-950/40 text-amber-300",
-  failed: "border-red-800 bg-red-950/40 text-red-300",
-  skipped: "border-zinc-700 bg-zinc-800/40 text-zinc-400",
+  submitted: "border-positive/30 bg-positive/10 text-positive",
+  pending: "border-warning/30 bg-warning/10 text-warning",
+  failed: "border-destructive/30 bg-destructive/10 text-destructive",
+  skipped: "border-border bg-secondary/60 text-muted-foreground",
 };
 
 export function StatusPill({ status }: { status: string }) {
@@ -237,33 +333,31 @@ export function StatusPill({ status }: { status: string }) {
         ? LEG_TONE.failed
         : LEG_TONE.skipped);
   return (
-    <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-[11px] uppercase ${tone}`}
-    >
+    <span className={cn("rounded-md border px-2 py-0.5 text-[11px]", tone)}>
       {status}
     </span>
   );
 }
 
-export function TxLink({ hash }: { hash: string }) {
+function TxLink({ hash }: { hash: string }) {
   return (
     <a
       href={basescanTx(hash)}
       target="_blank"
       rel="noreferrer"
-      className="font-mono text-xs text-sky-400 underline-offset-2 hover:underline"
+      className="tnum text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
     >
       {shortHash(hash)}
     </a>
   );
 }
 
-export function Steps({ steps }: { steps: Step[] }) {
+function Steps({ steps }: { steps: Step[] }) {
   return (
-    <ol className="mt-2 space-y-1 border-l border-zinc-800 pl-3">
+    <ol className="mt-2 space-y-1 border-l border-border pl-3">
       {steps.map((s) => (
         <li key={s.step} className="flex items-center gap-2 text-xs">
-          <span className="text-zinc-500">step {s.step}</span>
+          <span className="text-muted-foreground">step {s.step}</span>
           <StatusPill status={s.outcome} />
           {s.tx_hash && <TxLink hash={s.tx_hash} />}
         </li>
@@ -273,9 +367,10 @@ export function Steps({ steps }: { steps: Step[] }) {
 }
 
 /**
- * Renders a deposit/rebalance response. HTTP 207 is the normal partial case:
- * show which legs moved and which did not, never one blanket failure.
- * `pending` means the receipt poll timed out — the transaction may still land.
+ * Renders a deposit or withdraw response. HTTP 207 is the normal partial case:
+ * show which legs moved and which did not, never one blanket failure. `pending`
+ * means the receipt poll timed out — the transaction may still land, so it is
+ * amber and never red, and retrying could submit the same money twice.
  */
 export function SettleReport({
   result,
@@ -288,48 +383,35 @@ export function SettleReport({
   return (
     <div className="space-y-3">
       <div
-        className={`rounded border p-3 text-sm ${
+        className={cn(
+          "rounded-lg border p-3 text-sm",
           status === 207
-            ? "border-amber-800 bg-amber-950/30 text-amber-200"
-            : "border-emerald-800 bg-emerald-950/30 text-emerald-200"
-        }`}
-      >
-        {status === 207 ? (
-          <>
-            <div className="font-medium">
-              Partially settled ({result.failed_legs} failed,{" "}
-              {result.pending_legs} pending)
-            </div>
-            <div className="mt-1 text-amber-300/80">
-              Legs are independent. The ones marked submitted moved money; the
-              rest are listed below with their reason.
-            </div>
-          </>
-        ) : (
-          <div className="font-medium">
-            All legs settled
-            {result.submitted_usd !== undefined &&
-              ` · ${fmtUsd(result.submitted_usd)} submitted`}
-            {result.moved_legs !== undefined && ` · ${result.moved_legs} moved`}
-          </div>
+            ? "border-warning/30 bg-warning/10 text-warning"
+            : "border-positive/30 bg-positive/10 text-positive",
         )}
+      >
+        {status === 207
+          ? `Partial — ${result.failed_legs} failed, ${result.pending_legs} pending`
+          : `Settled${
+              result.submitted_usd !== undefined
+                ? ` · ${fmtUsd(result.submitted_usd)}`
+                : ""
+            }`}
       </div>
       {result.pending_legs > 0 && (
-        <p className="text-xs text-amber-400/90">
-          Pending is not a failure: the executor&apos;s receipt poll timed out
-          and the transaction is probably still in the mempool. Check the tx
-          hash on Basescan before retrying — retrying could submit the same
-          money twice.
+        <p className="text-xs text-warning/90">
+          Pending is not failure: the receipt poll timed out. Check the hash
+          before retrying — retrying can submit the same money twice.
         </p>
       )}
-      {legs.length === 0 ? (
-        <Empty>No legs were produced for this request.</Empty>
-      ) : (
-        <ul className="divide-y divide-zinc-800 rounded border border-zinc-800">
-          {legs.map((leg, i) => (
-            <LegRow key={`${leg.asset}-${i}`} leg={leg} />
-          ))}
-        </ul>
+      {legs.length > 0 && (
+        <Panel>
+          <ul className="divide-y divide-border">
+            {legs.map((leg, i) => (
+              <LegRow key={`${leg.asset}-${i}`} leg={leg} />
+            ))}
+          </ul>
+        </Panel>
       )}
     </div>
   );
@@ -337,31 +419,23 @@ export function SettleReport({
 
 function LegRow({ leg }: { leg: LegResult }) {
   return (
-    <li className="p-3">
+    <li className="p-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-sm text-zinc-100">{leg.asset}</span>
+        <span className="inline-flex items-center gap-2 text-sm font-medium">
+          <TokenIcon symbol={leg.asset} size={20} />
+          {displayAsset(leg.asset)}
+        </span>
         <StatusPill status={leg.status} />
-        <span className="font-mono text-sm text-zinc-400">
+        <span className="tnum text-sm text-muted-foreground">
           {fmtUsd(leg.amount_usd)}
         </span>
         {leg.project && (
-          <span className="text-xs text-zinc-500">→ {leg.project}</span>
-        )}
-        {leg.apy !== undefined && leg.apy > 0 && (
-          <span className="font-mono text-xs text-emerald-400">
-            {leg.apy.toFixed(2)}% APY
-          </span>
+          <span className="text-xs text-muted-foreground">{leg.project}</span>
         )}
         {leg.tx_hash && <TxLink hash={leg.tx_hash} />}
       </div>
-      {leg.venue_id && (
-        <div className="mt-1 break-all font-mono text-[11px] text-zinc-600">
-          {leg.from_venue_id ? `${leg.from_venue_id} → ` : ""}
-          {leg.venue_id}
-        </div>
-      )}
       {leg.reason && (
-        <div className="mt-1 text-xs text-zinc-400">{leg.reason}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{leg.reason}</div>
       )}
       {leg.steps && leg.steps.length > 0 && <Steps steps={leg.steps} />}
     </li>

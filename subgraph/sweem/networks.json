@@ -1,0 +1,62 @@
+{
+  "base-sepolia": {
+    "PoolConfigurator": {
+      "address": "0x347Ae6820F48e9Dd563235742d89FAef6ffCaA72",
+      "startBlock": 6719154
+    },
+    "Pool": {
+      "address": "0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b",
+      "startBlock": 6719154
+    },
+    "Comet": {
+      "address": "0x571621Ce60Cebb0c1D442B5afb38B1663C6Bf017",
+      "startBlock": 7646646
+    },
+    "CometWeth": {
+      "address": "0x61490650AbaA31393464C3f34E8B29cd1C44118E",
+      "startBlock": 7907557
+    },
+    "MetaMorphoFactory": {
+      "address": "0xA9c3D3a366466Fa809d1Ae982Fb2c46E5fC41101",
+      "startBlock": 9315415
+    },
+    "MetaMorphoV1_1Factory": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 9315415
+    },
+    "RateFeeds": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 6719154
+    }
+  },
+  "base": {
+    "PoolConfigurator": {
+      "address": "0x5731a04B1E775f0fdd454Bf70f3335886e9A96be",
+      "startBlock": 51214400
+    },
+    "Pool": {
+      "address": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+      "startBlock": 51214400
+    },
+    "Comet": {
+      "address": "0xb125E6687d4313864e53df431d5425969c15Eb2F",
+      "startBlock": 51214400
+    },
+    "CometWeth": {
+      "address": "0x46e6b214b524310239732D51387075E0e70970bf",
+      "startBlock": 51214400
+    },
+    "MetaMorphoFactory": {
+      "address": "0xA9c3D3a366466Fa809d1Ae982Fb2c46E5fC41101",
+      "startBlock": 51214400
+    },
+    "MetaMorphoV1_1Factory": {
+      "address": "0xFf62A7c278C62eD665133147129245053Bbf5918",
+      "startBlock": 51214400
+    },
+    "RateFeeds": {
+      "address": "0xB88BAc61a4Ca37C43a3725912B1f472c9A5bc061",
+      "startBlock": 51214400
+    }
+  }
+}

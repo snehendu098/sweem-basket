@@ -145,12 +145,15 @@ func (s *Store) RebalanceHistory(ctx context.Context, userID string, since time.
 // resolve: the executor's receipt poll timed out, so the row sits `pending`
 // with a tx hash and no position written.
 type PendingExecution struct {
-	ID        string
-	UserID    string
-	BasketID  string
-	Kind      string
-	Asset     string
-	ToVenue   string
+	ID       string
+	UserID   string
+	BasketID string
+	Kind     string
+	Asset    string
+	ToVenue  string
+	// FromVenue is what a withdraw carries instead of ToVenue. The sweeper
+	// needs one of the two to know which chain to look the receipt up on.
+	FromVenue string
 	AmountUSD float64
 	TxHash    string
 	CreatedAt time.Time
@@ -162,7 +165,7 @@ type PendingExecution struct {
 func (s *Store) PendingExecutions(ctx context.Context, olderThan time.Time, limit int) ([]PendingExecution, error) {
 	const q = `
 		SELECT id::text, user_id::text, COALESCE(basket_id::text, ''), kind, asset,
-		       COALESCE(to_venue, ''), amount_usd, tx_hash, created_at
+		       COALESCE(to_venue, ''), COALESCE(from_venue, ''), amount_usd, tx_hash, created_at
 		FROM executions
 		WHERE status = 'pending' AND tx_hash IS NOT NULL AND created_at <= $1
 		ORDER BY created_at
@@ -177,7 +180,7 @@ func (s *Store) PendingExecutions(ctx context.Context, olderThan time.Time, limi
 	for rows.Next() {
 		var p PendingExecution
 		if err := rows.Scan(&p.ID, &p.UserID, &p.BasketID, &p.Kind, &p.Asset,
-			&p.ToVenue, &p.AmountUSD, &p.TxHash, &p.CreatedAt); err != nil {
+			&p.ToVenue, &p.FromVenue, &p.AmountUSD, &p.TxHash, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

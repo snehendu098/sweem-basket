@@ -221,9 +221,8 @@ means splitting the rate at the market-data source, not here.
 | `BREAKEVEN_HORIZON` | `MIN_HOLD_PERIOD` | Assumed holding period when pricing a move |
 | `REWARD_DISCOUNT` | `0.5` | Weight on `apy_reward` |
 | `GAS_COST_USD` | unset | Fixed USD cost override. Tests and dry runs only, never a fallback |
-| `BASE_RPC_URL` | `https://sepolia.base.org` | Base node for gas price, ETH/USD and receipts (same var the executor uses). The public endpoint rate-limits and caps `eth_getLogs` at 10k blocks. |
-| `CHAIN_ID` | `84532` | selects the Chainlink ETH/USD aggregator (`8453` = Base mainnet) |
-| `CHAINLINK_ETH_USD` | `0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70` | ETH/USD aggregator on Base |
+| `BASE_RPC_URL_8453` | `https://mainnet.base.org` | Base mainnet node: gas price, ETH/USD and receipts. The public endpoint rate-limits. |
+| `BASE_RPC_URL_84532` | `https://sepolia.base.org` | Base Sepolia node, same three jobs. Both chains are priced and swept independently; a position's own chain picks the pair. |
 | `GAS_UNITS_REBALANCE` | `556000` | Measured withdraw + approve + deposit |
 | `PRICE_MAX_AGE` | `1h` | Reject an oracle answer older than this |
 | `PRICE_CACHE_TTL` | `60s` | ETH price cache |

@@ -18,8 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 # Read at startup; the executor refuses to start without it.
 COPY venues.json ./venues.json
+COPY swaps.json ./swaps.json
 COPY --from=build /src/target/release/executor /usr/local/bin/executor
-ENV VENUES_PATH=/app/venues.json EXECUTOR_ADDR=0.0.0.0:8082
+ENV VENUES_PATH=/app/venues.json SWAPS_PATH=/app/swaps.json EXECUTOR_ADDR=0.0.0.0:8082
 EXPOSE 8082
 USER nobody
 ENTRYPOINT ["/usr/local/bin/executor"]

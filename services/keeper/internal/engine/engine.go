@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/client"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/policy"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/store"
@@ -29,10 +30,11 @@ type (
 	Rebalancer interface {
 		Rebalance(ctx context.Context, basketID, privyDID string) (client.RebalanceResult, error)
 	}
-	// Coster prices one rebalance in USD from live chain data. It returns an
-	// error rather than a guess when an input is missing or stale.
+	// Coster prices one rebalance in USD from live chain data, on the chain the
+	// move would happen on — gas and ETH price are both per chain. It returns
+	// an error rather than a guess when an input is missing or stale.
 	Coster interface {
-		CostUSD(ctx context.Context) (float64, error)
+		CostUSD(ctx context.Context, chainID int) (float64, error)
 	}
 )
 
@@ -67,14 +69,21 @@ type Stats struct {
 	LegsSkipped   map[string]int `json:"legs_skipped_by_reason"`
 	Errors        int            `json:"errors"`
 	LastError     string         `json:"last_error,omitempty"`
-	// GasCostUSD is the live cost the breakeven was priced on this pass.
-	GasCostUSD float64    `json:"gas_cost_usd"`
-	Sweep      SweepStats `json:"sweep"`
+	// GasCostUSD is the live cost the breakeven was priced on this pass, per
+	// chain label. Two chains cost different amounts to move on, so one number
+	// would be a number for the wrong chain half the time.
+	GasCostUSD map[string]float64 `json:"gas_cost_usd"`
+	Sweep      SweepStats         `json:"sweep"`
 }
 
 // SkipReasonCostUnavailable is recorded when the pass could not price a
 // rebalance. No decision is taken: fabricated cost data is worse than none.
 const SkipReasonCostUnavailable = "gas_cost_unavailable"
+
+// SkipReasonUnknownChain is recorded when a position names a chain this
+// backend does not serve. Routing it against the chain we happen to be
+// configured for is how money lands on the wrong network.
+const SkipReasonUnknownChain = "unknown_chain"
 
 func (e *Engine) now() time.Time {
 	if e.Now != nil {
@@ -90,6 +99,10 @@ func (e *Engine) Stats() Stats {
 	for k, v := range e.stats.LegsSkipped {
 		s.LegsSkipped[k] = v
 	}
+	s.GasCostUSD = map[string]float64{}
+	for k, v := range e.stats.GasCostUSD {
+		s.GasCostUSD[k] = v
+	}
 	return s
 }
 
@@ -97,7 +110,8 @@ func (e *Engine) Stats() Stats {
 // single subscription's failure: one broken user must not stall the other 99.
 func (e *Engine) Pass(ctx context.Context) Stats {
 	start := e.now()
-	st := Stats{Passes: e.stats.Passes + 1, LastPassAt: start, LegsSkipped: map[string]int{}}
+	st := Stats{Passes: e.stats.Passes + 1, LastPassAt: start,
+		LegsSkipped: map[string]int{}, GasCostUSD: map[string]float64{}}
 
 	// One venue lookup per (asset, chain) per pass, shared across subscribers
 	// and with the sweeper.
@@ -107,22 +121,11 @@ func (e *Engine) Pass(ctx context.Context) Stats {
 	// drift evaluation reasons about positions we know are stale.
 	st.Sweep = e.sweepPending(ctx, venues)
 
-	// Price the move on live data. No fallback: if gas price or ETH price
-	// cannot be had, the pass makes no decisions at all.
-	cost, err := e.Cost.CostUSD(ctx)
-	if err != nil {
-		st.Errors++
-		st.LastError = err.Error()
-		st.LegsSkipped[SkipReasonCostUnavailable]++
-		e.Log.Error("pass skipped: cannot price a rebalance", "reason", SkipReasonCostUnavailable, "err", err)
-		st.LastPassMS = e.now().Sub(start).Milliseconds()
-		e.stats = st
-		return st
-	}
-	st.GasCostUSD = cost
-	// A copy, so the live price never mutates the configured params.
-	params := e.Policy
-	params.GasCostUSD = cost
+	// Price the move on live data, per chain and on demand: a chain whose gas
+	// or ETH price cannot be read skips its own legs, and never borrows the
+	// other chain's cost. No fallback — a rebalance decided on fabricated cost
+	// data is worse than no rebalance.
+	costs := &costCache{chains: map[int]chainCost{}, engine: e, st: &st}
 
 	subs, err := e.Store.ActiveSubscriptions(ctx)
 	if err != nil {
@@ -137,7 +140,7 @@ func (e *Engine) Pass(ctx context.Context) Stats {
 	// Per-user state for the pass: history is read once, and moves decided in
 	// this pass count against the daily cap immediately, so a user subscribed
 	// to several baskets cannot spend the budget twice.
-	pass := &passState{hist: map[string]store.History{}, spent: map[string]int{}, params: params}
+	pass := &passState{hist: map[string]store.History{}, spent: map[string]int{}, params: e.Policy, costs: costs}
 
 	for _, sub := range subs {
 		st.Subscriptions++
@@ -164,6 +167,41 @@ type passState struct {
 	hist   map[string]store.History
 	spent  map[string]int
 	params policy.Params
+	costs  *costCache
+}
+
+// costCache prices one rebalance per chain, once per pass.
+type costCache struct {
+	chains map[int]chainCost
+	engine *Engine
+	st     *Stats
+}
+
+type chainCost struct {
+	usd float64
+	err error
+}
+
+// usd returns the cost of a move on one chain, or false if it cannot be had.
+func (c *costCache) usd(ctx context.Context, chainID int, label string) (float64, bool) {
+	got, ok := c.chains[chainID]
+	if !ok {
+		usd, err := c.engine.Cost.CostUSD(ctx, chainID)
+		got = chainCost{usd: usd, err: err}
+		c.chains[chainID] = got
+		if err != nil {
+			c.st.Errors++
+			c.st.LastError = err.Error()
+			c.engine.Log.Error("cannot price a rebalance on this chain; its legs are skipped",
+				"chain", label, "chain_id", chainID, "reason", SkipReasonCostUnavailable, "err", err)
+		} else {
+			c.st.GasCostUSD[label] = usd
+		}
+	}
+	if got.err != nil {
+		return 0, false
+	}
+	return got.usd, true
 }
 
 func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscription, venues map[string][]client.Venue, pass *passState, st *Stats) error {
@@ -201,6 +239,23 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 		if chain == "" {
 			chain = sub.Chain
 		}
+		chainID, known := chains.ID(chain)
+		if !known {
+			st.LegsSkipped[SkipReasonUnknownChain]++
+			e.Log.Error("skip leg", "reason", SkipReasonUnknownChain, "user_id", sub.UserID,
+				"asset", p.Asset, "chain", chain)
+			continue
+		}
+		cost, priced := pass.costs.usd(ctx, chainID, chain)
+		if !priced {
+			st.LegsSkipped[SkipReasonCostUnavailable]++
+			continue
+		}
+		// A copy per leg, so the live price never mutates the configured params
+		// and one chain's cost never prices another chain's move.
+		params := pass.params
+		params.GasCostUSD = cost
+
 		key := p.Asset + "@" + chain
 		list, ok := venues[key]
 		if !ok {
@@ -211,7 +266,7 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 			venues[key] = list
 		}
 
-		best, current, found := e.rank(list, p, pass.params.RewardDiscount)
+		best, current, found := e.rank(list, p, params.RewardDiscount)
 		if !found {
 			st.LegsSkipped["no_venue"]++
 			e.Log.Info("skip leg", "reason", "no_venue", "user_id", sub.UserID,
@@ -228,7 +283,7 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 			LastMove:     hist.LastMove[p.Asset],
 			MovesLast24h: budget,
 			Now:          now,
-		}, pass.params)
+		}, params)
 
 		e.Log.Info("leg decision",
 			"move", d.Move, "reason", d.Reason,
@@ -273,9 +328,9 @@ func (e *Engine) evaluateSubscription(ctx context.Context, sub store.Subscriptio
 // has dropped out of market-data is the conservative choice: a stale, usually
 // higher number makes the keeper less eager to move, not more.
 func (e *Engine) rank(list []client.Venue, p store.Position, discount float64) (best client.Venue, currentAPY float64, found bool) {
-	currentAPY = policy.EffectiveAPY(p.EntryAPY, 0, discount)
+	currentAPY = policy.EffectiveAPY(p.EntryAPY, 0, 0, discount)
 	for _, v := range list {
-		eff := policy.EffectiveAPY(v.APYBase, v.APYReward, discount)
+		eff := policy.EffectiveAPY(v.APYBase, v.APYReward, v.APYIntrinsic, discount)
 		if v.ID == p.VenueID {
 			currentAPY = eff
 		}

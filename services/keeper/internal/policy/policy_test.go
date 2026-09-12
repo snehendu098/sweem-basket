@@ -23,21 +23,26 @@ func base() Params {
 
 func TestEffectiveAPY(t *testing.T) {
 	tests := []struct {
-		name                   string
-		base, reward, discount float64
-		want                   float64
+		name                              string
+		base, reward, intrinsic, discount float64
+		want                              float64
 	}{
-		{"pure base is untouched", 5, 0, 0.5, 5},
-		{"reward halved at 0.5", 4, 6, 0.5, 7},
-		{"reward ignored at 0", 4, 6, 0, 4},
-		{"reward trusted at 1", 4, 6, 1, 10},
+		{"pure base is untouched", 5, 0, 0, 0.5, 5},
+		{"reward halved at 0.5", 4, 6, 0, 0.5, 7},
+		{"reward ignored at 0", 4, 6, 0, 0, 4},
+		{"reward trusted at 1", 4, 6, 0, 1, 10},
 		// Moonwell's subgraph folds emissions into the base rate, so a venue
 		// can report a big apy_base with apy_reward=0 and dodge the discount.
-		{"undisclosed rewards are not discountable", 14.5, 0, 0.5, 14.5},
+		{"undisclosed rewards are not discountable", 14.5, 0, 0, 0.5, 14.5},
+		// Staking yield is issuance, not an incentive programme: it counts in
+		// full at every discount.
+		{"intrinsic is undiscounted", 0.85, 0, 2.26, 0.5, 3.11},
+		{"intrinsic survives a zero discount", 0.85, 6, 2.26, 0, 3.11},
+		{"a hold venue is all intrinsic", 0, 0, 2.26, 0.5, 2.26},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := EffectiveAPY(tt.base, tt.reward, tt.discount); got != tt.want {
+			if got := EffectiveAPY(tt.base, tt.reward, tt.intrinsic, tt.discount); math.Abs(got-tt.want) > 1e-9 {
 				t.Fatalf("got %v want %v", got, tt.want)
 			}
 		})
@@ -152,8 +157,8 @@ func TestEvaluateHysteresis(t *testing.T) {
 func TestRewardDiscountChangesTheVerdict(t *testing.T) {
 	p := base()
 	p.Horizon = 365 * 24 * time.Hour
-	current := EffectiveAPY(5, 0, p.RewardDiscount)   // 5.0 steady
-	candidate := EffectiveAPY(2, 7, p.RewardDiscount) // 9.0 raw, 5.5 effective
+	current := EffectiveAPY(5, 0, 0, p.RewardDiscount)   // 5.0 steady
+	candidate := EffectiveAPY(2, 7, 0, p.RewardDiscount) // 9.0 raw, 5.5 effective
 	if raw := 2 + 7.0; raw <= current {
 		t.Fatal("test setup: raw candidate should look better")
 	}
@@ -165,7 +170,54 @@ func TestRewardDiscountChangesTheVerdict(t *testing.T) {
 		t.Fatalf("0.5pp on $1000 over a year beats $3 gas; got %+v", got)
 	}
 	// Trusting rewards fully would have claimed a 4pp edge instead of 0.5pp.
-	if undiscounted := EffectiveAPY(2, 7, 1) - current; undiscounted != 4 {
+	if undiscounted := EffectiveAPY(2, 7, 0, 1) - current; undiscounted != 4 {
 		t.Fatalf("undiscounted drift %.4f", undiscounted)
+	}
+}
+
+// The live mispricing intrinsic yield exists to fix: a user holding wstETH
+// earns 2.26% from the staking rate plus 0.85% from lending it. Price the
+// position at its lending leg alone and a 1.2% USDC venue looks like an
+// upgrade, so the keeper moves them out of 3.11% into 1.2% and charges gas for
+// it. With the intrinsic rate counted, the position is simply better and stays.
+func TestIntrinsicYieldKeepsABetterPositionInPlace(t *testing.T) {
+	p := base()
+	// 0.85 -> 1.2 is a 0.35pp drift, under the default floor. Lower the floor so
+	// the floor is not what saves the user here: the intrinsic rate has to.
+	p.MinDriftAPY = 0.25
+	const (
+		lending   = 0.85 // wstETH supply APY on the lending venue
+		staking   = 2.26 // wstETH exchange rate growth, measured
+		usdcVenue = 1.2  // the "better" venue the keeper would have chosen
+	)
+	held := EffectiveAPY(lending, 0, staking, p.RewardDiscount)
+	if held <= usdcVenue {
+		t.Fatalf("test setup: held %.2f should beat the candidate %.2f", held, usdcVenue)
+	}
+	got := Evaluate(Input{
+		Asset:       "WSTETH",
+		PositionUSD: 100_000, // large enough that gas is never the reason
+		CurrentAPY:  held,
+		BestAPY:     EffectiveAPY(usdcVenue, 0, 0, p.RewardDiscount),
+		Now:         now,
+	}, p)
+	if got.Move {
+		t.Fatalf("moved a 3.11%% position into a 1.2%% one: %+v", got)
+	}
+	if got.Reason != ReasonDriftFloor {
+		t.Fatalf("reason %q, want %q (drift is negative)", got.Reason, ReasonDriftFloor)
+	}
+
+	// And the bug itself, kept as the counter-example: blind to the staking
+	// rate, the same inputs say "move".
+	blind := Evaluate(Input{
+		Asset:       "WSTETH",
+		PositionUSD: 100_000,
+		CurrentAPY:  EffectiveAPY(lending, 0, 0, p.RewardDiscount),
+		BestAPY:     EffectiveAPY(usdcVenue, 0, 0, p.RewardDiscount),
+		Now:         now,
+	}, p)
+	if !blind.Move {
+		t.Fatal("test setup: without the intrinsic rate the keeper should want to move")
 	}
 }

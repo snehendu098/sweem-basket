@@ -17,17 +17,20 @@ var ErrNoVenue = errors.New("marketdata: no venue for asset")
 
 // Venue mirrors the market-data service's normalized venue schema.
 type Venue struct {
-	ID         string    `json:"id"`
-	Chain      string    `json:"chain"`
-	Project    string    `json:"project"`
-	Symbol     string    `json:"symbol"`
-	Asset      string    `json:"asset"`
-	TVLUsd     float64   `json:"tvl_usd"`
-	APY        float64   `json:"apy"`
-	APYBase    float64   `json:"apy_base"`
-	APYReward  float64   `json:"apy_reward"`
-	Stablecoin bool      `json:"stablecoin"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID        string  `json:"id"`
+	Chain     string  `json:"chain"`
+	Project   string  `json:"project"`
+	Symbol    string  `json:"symbol"`
+	Asset     string  `json:"asset"`
+	TVLUsd    float64 `json:"tvl_usd"`
+	APY       float64 `json:"apy"`
+	APYBase   float64 `json:"apy_base"`
+	APYReward float64 `json:"apy_reward"`
+	// Yield the asset earns with no protocol interaction — holding wstETH is
+	// already a position. Undiscounted wherever it is ranked.
+	APYIntrinsic float64   `json:"apy_intrinsic"`
+	Stablecoin   bool      `json:"stablecoin"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Client struct {
@@ -43,7 +46,11 @@ func New(baseURL string) *Client {
 }
 
 // Best returns the highest-APY venue for an asset, subject to a TVL floor.
-// This is the routing decision: where a basket's slice of an asset should go.
+//
+// This is NOT the routing decision — see api.bestRoutable. The best indexed
+// venue may be one the executor cannot transact, so routing filters this set
+// against the executor's allowlist. Kept because it is the cheapest read for
+// "what is the best rate that exists", which is a display question.
 func (c *Client) Best(ctx context.Context, asset, chain string, minTVL float64) (Venue, error) {
 	q := url.Values{"asset": {asset}, "chain": {chain}}
 	if minTVL > 0 {
@@ -57,10 +64,13 @@ func (c *Client) Best(ctx context.Context, asset, chain string, minTVL float64) 
 }
 
 // Venues lists venues for an asset, best APY first.
-func (c *Client) Venues(ctx context.Context, asset, chain string, limit int) ([]Venue, error) {
+func (c *Client) Venues(ctx context.Context, asset, chain string, minTVL float64, limit int) ([]Venue, error) {
 	q := url.Values{"chain": {chain}}
 	if asset != "" {
 		q.Set("asset", asset)
+	}
+	if minTVL > 0 {
+		q.Set("min_tvl", strconv.FormatFloat(minTVL, 'f', 0, 64))
 	}
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))

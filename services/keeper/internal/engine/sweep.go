@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/client"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/rpc"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/store"
@@ -14,7 +15,7 @@ import (
 // Receipts is the chain read the sweeper needs. A nil receipt with a nil error
 // means "not mined yet", which is not a failure.
 type Receipts interface {
-	TransactionReceipt(ctx context.Context, txHash string) (*rpc.Receipt, error)
+	TransactionReceipt(ctx context.Context, chainID int, txHash string) (*rpc.Receipt, error)
 }
 
 // SweepStats is the audit surface for the sweeper.
@@ -45,7 +46,21 @@ func (e *Engine) sweepPending(ctx context.Context, venues map[string][]client.Ve
 
 	for _, row := range rows {
 		st.Checked++
-		receipt, err := e.Receipts.TransactionReceipt(ctx, row.TxHash)
+		// The chain comes from the venue the execution targeted, not from a
+		// global setting: a pending mainnet transaction must be looked up on
+		// mainnet even while the process also serves Sepolia.
+		chain, _ := splitVenueID(row.ToVenue)
+		if chain == "" {
+			chain, _ = splitVenueID(row.FromVenue)
+		}
+		chainID, known := chains.ID(chain)
+		if !known {
+			st.Errors++
+			e.Log.Error("sweep: execution names a chain we do not serve",
+				"execution_id", row.ID, "tx_hash", row.TxHash, "chain", chain)
+			continue
+		}
+		receipt, err := e.Receipts.TransactionReceipt(ctx, chainID, row.TxHash)
 		if err != nil {
 			st.Errors++
 			e.Log.Error("sweep: receipt", "execution_id", row.ID, "tx_hash", row.TxHash, "err", err)

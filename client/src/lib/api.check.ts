@@ -3,11 +3,29 @@
  *   - 207 Multi-Status is a result, not a thrown error
  *   - both services' error envelopes are unwrapped to a real message
  *   - a null price renders as "value unknown", never a fabricated dollar
+ *   - an uncomputable basket APY is null, never 0
+ *   - an even split always sums to exactly 10000 bps
  *
  * Run: bun run src/lib/api.check.ts
  */
 import assert from "node:assert/strict";
-import { ApiError, fmtUsd, fmtUsdOrUnknown, market, walletFetch } from "./api";
+import {
+  ApiError,
+  DEFAULT_CHAIN_ID,
+  activeChain,
+  basescanTx,
+  blendApy,
+  displayAsset,
+  evenSplit,
+  readBalances,
+  setActiveChainId,
+  fmtUsd,
+  fmtUsdOrUnknown,
+  market,
+  publicBaskets,
+  walletFetch,
+} from "./api";
+import type { AssetSummary } from "./types";
 
 type Stub = { status: number; body: unknown };
 const realFetch = globalThis.fetch;
@@ -52,6 +70,117 @@ async function main() {
   assert.equal(fmtUsdOrUnknown(undefined), "value unknown");
   assert.equal(fmtUsdOrUnknown(0), "$0.00");
   assert.equal(fmtUsd(1234.5), "$1,234.50");
+
+  // Basket APY: weighted over the per-asset best venue, and null — never 0 —
+  // when any weighted asset has no venue at all.
+  const summaries = [
+    { asset: "USDC", best_apy: 10 },
+    { asset: "DAI", best_apy: 5 },
+  ] as AssetSummary[];
+  assert.equal(
+    blendApy(
+      [
+        { asset: "USDC", weight_bps: 6000 },
+        { asset: "DAI", weight_bps: 4000 },
+      ],
+      summaries,
+    ),
+    8,
+  );
+  assert.equal(blendApy([{ asset: "PYUSD", weight_bps: 10000 }], summaries), null);
+  assert.equal(blendApy([], summaries), null);
+  assert.equal(blendApy([{ asset: "USDC", weight_bps: 10000 }], null), null);
+
+  // Even split: the backend rejects anything that is not exactly 10000, so the
+  // rounding remainder must land somewhere. 3 assets is 3334/3333/3333.
+  for (let n = 1; n <= 8; n++) {
+    const assets = Array.from({ length: n }, (_, i) => `A${i}`);
+    const split = evenSplit(assets);
+    assert.equal(split.length, n);
+    assert.equal(
+      split.reduce((s, w) => s + w.weight_bps, 0),
+      10000,
+      `even split of ${n} assets must sum to 10000`,
+    );
+    assert.ok(split.every((w) => w.weight_bps > 0));
+    // Nobody's slice is more than 1 bp off anybody else's.
+    const min = Math.min(...split.map((w) => w.weight_bps));
+    const max = Math.max(...split.map((w) => w.weight_bps));
+    assert.ok(max - min <= 1);
+    assert.deepEqual(
+      split.map((w) => w.asset),
+      assets,
+    );
+  }
+  assert.deepEqual(evenSplit([]), []);
+  assert.deepEqual(
+    evenSplit(["USDC", "WETH", "DAI"]).map((w) => w.weight_bps),
+    [3334, 3333, 3333],
+  );
+  // Percent readout uses the same rule, so it reads 34/33/33 and sums to 100.
+  assert.deepEqual(
+    evenSplit(["USDC", "WETH", "DAI"], 100).map((w) => w.weight_bps),
+    [34, 33, 33],
+  );
+
+  // Display mapping is display-only: the wire symbol is never rewritten.
+  assert.equal(displayAsset("WETH"), "ETH");
+  assert.equal(displayAsset("USDC"), "USDC");
+  assert.equal(evenSplit(["WETH"])[0].asset, "WETH");
+
+  // Public browsing needs no token, and the list unwraps either envelope shape.
+  stub({ status: 200, body: { data: [{ id: "a" }] } });
+  assert.equal((await publicBaskets()).length, 1);
+  stub({ status: 200, body: { data: { baskets: [{ id: "a" }, { id: "b" }] } } });
+  assert.equal((await publicBaskets()).length, 2);
+
+  // The active chain is what every chain-dependent read follows: the label the
+  // API is asked for and the explorer a hash links to.
+  setActiveChainId(8453);
+  assert.equal(activeChain().label, "base");
+  assert.equal(activeChain().testnet, false);
+  assert.ok(basescanTx("0xabc").startsWith("https://basescan.org/tx/"));
+  setActiveChainId(84532);
+  assert.equal(activeChain().label, "base-sepolia");
+  assert.equal(activeChain().testnet, true);
+  assert.ok(basescanTx("0xabc").startsWith("https://sepolia.basescan.org/tx/"));
+  setActiveChainId(DEFAULT_CHAIN_ID);
+
+  // Direct balance read: right calldata, right decimals, and a failed leg is
+  // null — never 0, which would render as an empty wallet.
+  const calls: string[] = [];
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as {
+      method: string;
+      params: unknown[];
+    };
+    calls.push(req.method);
+    if (req.method === "eth_getBalance") {
+      // 1.5 ETH in wei.
+      return new Response(
+        JSON.stringify({ result: "0x14d1120d7b160000" }),
+        { status: 200 },
+      );
+    }
+    const call = req.params[0] as { data: string };
+    // balanceOf(address): selector plus the address padded to 32 bytes.
+    assert.equal(
+      call.data,
+      "0x70a08231000000000000000000000000000000000000000000000000000000000000dead",
+    );
+    return new Response(JSON.stringify({ result: "0x3b9aca00" }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const bal = await readBalances("0x000000000000000000000000000000000000dEaD");
+  assert.equal(bal.eth, 1.5);
+  assert.equal(bal.usdc, 1000); // 1e9 raw units at 6 decimals
+  assert.equal(calls.length, 2);
+
+  globalThis.fetch = (async () => {
+    throw new Error("rpc down");
+  }) as unknown as typeof fetch;
+  const dead = await readBalances("0x000000000000000000000000000000000000dEaD");
+  assert.equal(dead.eth, null);
+  assert.equal(dead.usdc, null);
 
   globalThis.fetch = realFetch;
   console.log("api.check: all assertions passed");

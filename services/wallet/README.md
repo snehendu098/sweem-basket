@@ -47,8 +47,8 @@ Env (see `.env.example` at repo root):
 | `KEEPER_SECRET` | — | shared secret for the keeper; **empty disables the path** |
 | `TOKEN_API_JWT` | — | optional; unset ⇒ portfolio returns `onchain_available: false` |
 | `TOKEN_API_URL` | `https://token-api.thegraph.com` | |
-| `BASE_RPC_URL` | `https://sepolia.base.org` | same var the executor uses; the public endpoint rate-limits and caps `eth_getLogs` at 10k blocks |
-| `CHAIN_ID` | `84532` | selects the Chainlink feed table (`8453` = Base mainnet) |
+| `BASE_RPC_URL_8453` / `BASE_RPC_URL_84532` | public Base endpoints | one Chainlink client per chain; a basket's own `chain` picks which one prices its assets |
+| `DEFAULT_CHAIN` | `base` | canonical label a basket gets when the request does not name one (`base`, `base-sepolia`); an unknown value is fatal at boot |
 | `PRICE_MAX_AGE` | `1h` | grace *on top of* each feed's own measured heartbeat |
 | `PRICE_CACHE_TTL` | `1m` | per-feed, so one request is not a dozen RPC calls |
 | `WALLET_ADDR` | `:8080` | |
@@ -80,6 +80,8 @@ All `/v1/*` routes require `Authorization: Bearer <privy access token>`.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | db + executor reachability |
+| GET | `/public/baskets?limit=` | **no auth** — public baskets, narrowed view |
+| GET | `/public/baskets/{id}` | **no auth** — one public basket; 404 if private |
 | POST | `/v1/me` | bind Privy DID → wallet address + `privy_wallet_id`; record delegation |
 | GET | `/v1/me` | current user |
 | POST | `/v1/baskets` | create; weights must sum to 10000 bps |
@@ -93,6 +95,43 @@ All `/v1/*` routes require `Authorization: Bearer <privy access token>`.
 | POST | `/v1/baskets/{id}/rebalance` | move drifted positions; also the keeper's one route |
 | GET | `/v1/portfolio` | positions, live APY, drift vs best venue |
 | GET | `/v1/executions` | audit trail |
+
+### `/public/*` — discovery without a wallet
+
+`is_public` means discoverable. Requiring a Privy token to browse a public
+listing would put the whole social layer behind a login, so these two routes
+sit outside the `/v1/` authed mux and take no `Authorization` header. CORS
+already applies at the server level.
+
+They are not the authed handlers with the check removed — the response is
+narrowed on purpose, since this is an anonymous surface on a service that
+otherwise moves money:
+
+```json
+{
+  "id": "...", "name": "...", "description": "...", "chain": "Base",
+  "fee_bps": 25,
+  "weights": [{"asset": "USDC", "weight_bps": 10000}],
+  "created_at": "..."
+}
+```
+
+The list route returns an array of exactly that object (`[]` when empty).
+
+- **Public only.** A private basket answers `404`, not `403`: an anonymous
+  caller must not be able to confirm that an id exists.
+- **No `creator_id`.** It is an internal UUID. Creator identity is omitted
+  entirely rather than leaked; add a stable public handle when the UI needs one.
+- **No `subscribed`.** Per-caller, and there is no caller. Omitted, not `false`.
+- **Nothing from `positions` or `executions`** — no counts, balances, or
+  positions.
+- **`limit` is clamped to 100** (default 50), so one anonymous request cannot
+  ask for the whole table.
+- Weights come batched from the same query as the list; no N+1 on an
+  unauthenticated route.
+
+`GET /v1/baskets?scope=public` is unchanged and stays the route for logged-in
+users, who also get `subscribed`.
 
 ### Prices — Chainlink on Base, or nothing
 
@@ -311,3 +350,18 @@ the raw strings would leak the real secret's length through timing.
 
 - Nothing sweeps `pending` executions after the fact. A leg whose receipt poll
   timed out keeps its tx hash and stays `pending` until someone looks.
+
+## Routing is allowlist-aware
+
+market-data indexes every venue it can see; the executor can only encode calldata
+for the ones in its allowlist. Proposing an indexed-but-unexecutable venue is a
+route that fails after an execution row already exists, so routing filters the
+rate table against `GET /venues` on the executor (fetched once, cached for five
+minutes, never defaulted to "everything is allowed" — a failed fetch fails the
+leg).
+
+When the best indexed venue is not executable, the plan routes to the best one
+that is and says so in the leg's `reason`: *"best rate is 14.50% at moonwell,
+which this executor cannot transact; routing to aave-v3 at 4.20% instead"*.
+Discovery surfaces (`/venues`, `/assets` on market-data) keep showing the real
+best rate — a rate we cannot reach is worth naming, not hiding.

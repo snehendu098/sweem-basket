@@ -3,18 +3,25 @@
 # into an image. The `environment:` blocks below override only the host/port
 # values so the same .env keeps working when running services directly on the host.
 
-# Chain-specific — these change together when pointing the stack at another
-# network. Also swap executor/venues.json (its entries carry chain_id + target
-# addresses) and rebuild the executor image.
+# Chain-specific. Both networks are served at once — the frontend picks per
+# request — so everything here is per chain id. executor/venues.json carries
+# entries for both and is validated at startup against these labels.
 x-chain-env: &chain-env
-  # 84532 Base Sepolia, 8453 Base mainnet. Selects the Chainlink feed
-  # table in internal/shared/prices and the keeper's ETH/USD aggregator.
-  CHAIN_ID: ${CHAIN_ID:-84532}
-  BASE_RPC_URL: ${BASE_RPC_URL:-https://sepolia.base.org}
-  CHAINS: ${CHAINS:-Base}
-  DEFAULT_CHAIN: ${DEFAULT_CHAIN:-Base}
-  MORPHO_SUBGRAPH_ID: ${MORPHO_SUBGRAPH_ID:-}
-  CHAINLINK_ETH_USD: ${CHAINLINK_ETH_USD:-}
+  # Labels, canonical spelling: "base" (8453), "base-sepolia" (84532).
+  CHAINS: ${CHAINS:-base,base-sepolia}
+  DEFAULT_CHAIN: ${DEFAULT_CHAIN:-base}
+  BASE_RPC_URL_8453: ${BASE_RPC_URL_8453:-https://mainnet.base.org}
+  BASE_RPC_URL_84532: ${BASE_RPC_URL_84532:-https://sepolia.base.org}
+  # Subgraph deployments are per protocol per chain. A bare id hangs off
+  # GRAPH_GATEWAY_URL; a value starting with http is used verbatim.
+  AAVE_V3_SUBGRAPH_ID_8453: ${AAVE_V3_SUBGRAPH_ID_8453:-}
+  AAVE_V3_SUBGRAPH_ID_84532: ${AAVE_V3_SUBGRAPH_ID_84532:-}
+  COMPOUND_V3_SUBGRAPH_ID_8453: ${COMPOUND_V3_SUBGRAPH_ID_8453:-}
+  COMPOUND_V3_SUBGRAPH_ID_84532: ${COMPOUND_V3_SUBGRAPH_ID_84532:-}
+  MOONWELL_SUBGRAPH_ID_8453: ${MOONWELL_SUBGRAPH_ID_8453:-}
+  MOONWELL_SUBGRAPH_ID_84532: ${MOONWELL_SUBGRAPH_ID_84532:-}
+  MORPHO_SUBGRAPH_ID_8453: ${MORPHO_SUBGRAPH_ID_8453:-}
+  MORPHO_SUBGRAPH_ID_84532: ${MORPHO_SUBGRAPH_ID_84532:-}
 
 x-go-build: &go-build
   context: .
@@ -129,6 +136,7 @@ services:
       EXECUTOR_ADDR: 0.0.0.0:8082
       # chain-specific: the allowlist baked into the image
       VENUES_PATH: /app/venues.json
+      SWAPS_PATH: /app/swaps.json
     ports: ["8082:8082"]
     depends_on:
       wallet: { condition: service_healthy }
@@ -168,28 +176,10 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  client:
-    build:
-      context: ./client
-      # NEXT_PUBLIC_* are baked at build time. They resolve in the *browser*,
-      # so the URLs stay localhost, not compose hostnames.
-      args:
-        NEXT_PUBLIC_PRIVY_APP_ID: ${NEXT_PUBLIC_PRIVY_APP_ID:-}
-        NEXT_PUBLIC_PRIVY_SIGNER_ID: ${NEXT_PUBLIC_PRIVY_SIGNER_ID:-}
-        NEXT_PUBLIC_PRIVY_POLICY_ID: ${NEXT_PUBLIC_PRIVY_POLICY_ID:-}
-        NEXT_PUBLIC_WALLET_URL: ${NEXT_PUBLIC_WALLET_URL:-http://localhost:8080}
-        NEXT_PUBLIC_MARKET_DATA_URL: ${NEXT_PUBLIC_MARKET_DATA_URL:-http://localhost:8081}
-        NEXT_PUBLIC_CHAIN: ${NEXT_PUBLIC_CHAIN:-Base}
-    ports: ["3000:3000"]
-    depends_on:
-      wallet: { condition: service_healthy }
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-    restart: unless-stopped
+  # client is NOT containerised on purpose: run it locally with
+  #   cd client && bun dev        -> http://localhost:3000
+  # NEXT_PUBLIC_* are baked at build time, so a container needs a full rebuild
+  # per change. client/Dockerfile is kept if you ever want to ship an image.
 
 volumes:
   pgdata:

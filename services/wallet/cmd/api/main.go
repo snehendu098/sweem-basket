@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/config"
+	"github.com/snehendu098/sweem-basket/internal/shared/httpx"
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/api"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/auth"
@@ -21,6 +24,39 @@ import (
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/store"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/tokenapi"
 )
+
+// priceClients builds one Chainlink client per supported chain. Per-chain RPC
+// URLs with per-chain defaults: there is no shared BASE_RPC_URL, because one
+// node cannot answer for two networks and a price read off the wrong one is a
+// wrong number rather than a missing one.
+func priceClients() prices.Set {
+	set := prices.Set{}
+	for _, id := range chains.Supported() {
+		def := "https://mainnet.base.org"
+		if id == chains.BaseSepolia {
+			def = "https://sepolia.base.org"
+		}
+		set[id] = prices.New(
+			prices.NewHTTPRPC(config.GetEnv(fmt.Sprintf("BASE_RPC_URL_%d", id), def)),
+			id,
+			config.GetEnvDuration("PRICE_MAX_AGE", time.Hour), // grace atop each feed's heartbeat
+			config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
+		)
+	}
+	return set
+}
+
+// defaultChain is the chain a basket lands on when the client does not pick
+// one. An unknown value is fatal at boot rather than a surprise at deposit.
+func defaultChain() string {
+	raw := config.GetEnv("DEFAULT_CHAIN", chains.LabelBaseMainnet)
+	label, ok := chains.Normalize(raw)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "DEFAULT_CHAIN=%q is not a chain this service serves\n", raw)
+		os.Exit(1)
+	}
+	return label
+}
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -77,24 +113,21 @@ func run(log *slog.Logger) error {
 			config.GetEnv("TOKEN_API_URL", tokenapi.DefaultBaseURL),
 			config.GetEnv("TOKEN_API_JWT", ""),
 		),
-		Prices: prices.New(
-			prices.NewHTTPRPC(config.GetEnv("BASE_RPC_URL", "https://sepolia.base.org")),
-			config.GetEnvInt("CHAIN_ID", prices.DefaultChainID), // selects the whole feed table
-			config.GetEnvDuration("PRICE_MAX_AGE", time.Hour),   // grace atop each feed's heartbeat
-			config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
-		),
-		Log: log,
+		// One price client per chain we serve, each bound to that chain's
+		// verified feed table. A basket's own chain selects the client.
+		Prices: priceClients(),
+		Log:    log,
 		// Testnet-scaled, same reason as market-data's MIN_TVL_USD: Base Sepolia
 		// venues hold six figures at most.
 		MinVenueTVL:           config.GetEnvFloat("MIN_VENUE_TVL_USD", 5_000),
-		DefaultChain:          config.GetEnv("DEFAULT_CHAIN", "Base"),
+		DefaultChain:          defaultChain(),
 		RebalanceThresholdAPY: config.GetEnvFloat("REBALANCE_THRESHOLD_APY", 0.5),
 		MaxSlippageBps:        config.GetEnvInt("MAX_SLIPPAGE_BPS", 50),
 	}
 
 	httpSrv := &http.Server{
 		Addr:              config.GetEnv("WALLET_ADDR", ":8080"),
-		Handler:           srv.Routes(),
+		Handler:           httpx.CORS(config.GetEnvList("CORS_ORIGINS", []string{"http://localhost:3000"}), srv.Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      90 * time.Second, // executor calls can be slow

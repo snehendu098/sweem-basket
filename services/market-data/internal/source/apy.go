@@ -44,6 +44,27 @@ func APRToAPY(apr float64) float64 { return compound(apr/SecondsPerYear, Seconds
 // RayRateToAPY is the two steps above composed: ray -> APY percent.
 func RayRateToAPY(rayRate *big.Int) float64 { return APRToAPY(RayToAPR(rayRate)) }
 
+// rayOne is 1e27 as an integer, for rates expressed as a per-second GROWTH
+// FACTOR rather than a rate: Sky's `ssr` is 1.0000000011..e27, not 0.0000000011.
+var rayOne, _ = new(big.Int).SetString("1000000000000000000000000000", 10)
+
+// RayPerSecondFactorToAPY converts a ray per-second growth FACTOR to APY percent.
+//
+// In: a ray where 1e27 means "no growth" (Sky's savings rate `ssr`).
+// Out: APY percent, compounding every second.
+//
+// The subtraction happens in big.Float, before the value ever becomes a
+// float64: ssr - 1 is ~1e-9 and float64 keeps only about seven significant
+// digits of that once the leading 1 is in the way.
+func RayPerSecondFactorToAPY(factor *big.Int) float64 {
+	if factor == nil || factor.Cmp(rayOne) <= 0 {
+		return 0
+	}
+	delta := new(big.Float).SetInt(new(big.Int).Sub(factor, rayOne))
+	r, _ := new(big.Float).Quo(delta, ray).Float64()
+	return compound(r, SecondsPerYear)
+}
+
 // PerSecondMantissaToAPY converts a per-second rate to an APY percentage.
 //
 // In: a per-second growth rate scaled by `mantissa` (Compound III / Moonwell

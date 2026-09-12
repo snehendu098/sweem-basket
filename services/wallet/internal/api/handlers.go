@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/auth"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/marketdata"
@@ -136,6 +137,15 @@ func (s *Server) createBasket(w http.ResponseWriter, r *http.Request) {
 	if body.Chain == "" {
 		body.Chain = s.DefaultChain
 	}
+	// Store the canonical label: venue ids, the market-data API and the
+	// executor allowlist all key on it, and "Base " or "BASE" would route
+	// nowhere at deposit time instead of failing here, in the user's face.
+	canonical, ok := chains.Normalize(body.Chain)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "unsupported chain "+body.Chain)
+		return
+	}
+	body.Chain = canonical
 	b, err := s.Store.CreateBasket(r.Context(), store.Basket{
 		CreatorID:   u.ID,
 		Name:        body.Name,
@@ -151,6 +161,16 @@ func (s *Server) createBasket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, b)
+}
+
+// ownerView stamps the two per-caller flags onto a basket. They are
+// independent: a creator usually subscribes to their own basket too, and a
+// basket someone made but has not joined must not read as "not joined".
+// creator_id itself stays where it is — the boolean is the whole answer.
+func ownerView(b store.Basket, userID string, subscribed bool) store.Basket {
+	b.Subscribed = subscribed
+	b.CreatedByMe = b.CreatorID == userID
+	return b
 }
 
 func (s *Server) listBaskets(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +202,7 @@ func (s *Server) listBaskets(w http.ResponseWriter, r *http.Request) {
 		s.Log.Warn("subscribed lookup", "err", err)
 	}
 	for i := range bs {
-		bs[i].Subscribed = subs[bs[i].ID]
+		bs[i] = ownerView(bs[i], u.ID, subs[bs[i].ID])
 	}
 	writeJSON(w, http.StatusOK, bs)
 }
@@ -208,8 +228,7 @@ func (s *Server) getBasket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.Log.Warn("subscribed lookup", "err", err)
 	}
-	b.Subscribed = subs[b.ID]
-	writeJSON(w, http.StatusOK, b)
+	writeJSON(w, http.StatusOK, ownerView(b, u.ID, subs[b.ID]))
 }
 
 func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +324,8 @@ type Holding struct {
 	OnchainUSD  *float64 `json:"onchain_usd"`
 	Reconciled  bool     `json:"reconciled"`
 	ValueReason string   `json:"value_reason,omitempty"`
+	// RouteNote names a better-but-unexecutable venue when one exists.
+	RouteNote string `json:"route_note,omitempty"`
 }
 
 // driftAPY compares a position against the best venue available now.
@@ -329,8 +350,8 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	balances, onchainErr := s.TokenAPI.Balances(r.Context(),
-		u.WalletAddress, strings.ToLower(s.DefaultChain), 100)
+	network := tokenAPINetwork(s.DefaultChain)
+	balances, onchainErr := s.TokenAPI.Balances(r.Context(), u.WalletAddress, network, 100)
 	if onchainErr != nil && !errors.Is(onchainErr, tokenapi.ErrNotConfigured) {
 		// Onchain truth is a bonus view, never a reason to fail the endpoint.
 		s.Log.Warn("token api balances", "err", onchainErr)
@@ -340,8 +361,12 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 	var totalUSD, weightedAPY float64
 	for _, p := range positions {
 		h := Holding{Position: p, CurrentAPY: p.EntryAPY}
-		if best, err := s.Market.Best(r.Context(), p.Asset, p.Chain, s.MinVenueTVL); err == nil {
+		// The best venue shown here is the best *executable* one, so the drift a
+		// user sees is drift they can actually act on. A better rate we cannot
+		// reach is named in route_note rather than hidden or promised.
+		if best, note, err := s.bestRoutable(r.Context(), p.Asset, p.Chain); err == nil {
 			h.BestVenue = &best
+			h.RouteNote = note
 			h.CurrentAPY, h.DriftAPY = driftAPY(p, best)
 		}
 		if onchainErr == nil {
@@ -364,7 +389,7 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 	}
 	if onchainErr == nil {
 		out["onchain"] = map[string]any{
-			"chain":       strings.ToLower(s.DefaultChain),
+			"chain":       network,
 			"token_count": len(balances),
 			"balances":    balances,
 		}
@@ -395,7 +420,7 @@ func (s *Server) reconcile(ctx context.Context, p store.Position, balances []tok
 	if !found {
 		return nil, false, "no matching onchain balance; the position is likely held as a venue receipt token"
 	}
-	price, err := s.Prices.USD(ctx, p.Asset)
+	price, err := s.priceUSD(ctx, p.Chain, p.Asset)
 	if err != nil {
 		return nil, false, priceReason(p.Asset, err)
 	}
@@ -404,11 +429,23 @@ func (s *Server) reconcile(ctx context.Context, p store.Position, balances []tok
 	return &usd, math.Abs(usd-p.AmountUSD) <= tolerance, ""
 }
 
+// tokenAPINetwork maps our chain label onto the Token API's network name. The
+// Token API indexes Base mainnet only, so a Sepolia portfolio simply has no
+// onchain view — reported as unavailable rather than filled from mainnet.
+func tokenAPINetwork(chain string) string {
+	if id, ok := chains.ID(chain); ok && id == chains.BaseSepolia {
+		return "base-sepolia"
+	}
+	return "base"
+}
+
 // priceReason turns a pricing failure into something a user can act on.
 func priceReason(asset string, err error) string {
 	switch {
+	case errors.Is(err, prices.ErrNoChain):
+		return "this basket's chain is not configured for pricing; value unknown"
 	case errors.Is(err, prices.ErrNoFeed):
-		return "no Chainlink price feed for " + asset + " on Base; value unknown"
+		return "no Chainlink price feed for " + asset + " on this chain; value unknown"
 	case errors.Is(err, prices.ErrStale):
 		return "the " + asset + " price feed is stale; value unknown"
 	default:

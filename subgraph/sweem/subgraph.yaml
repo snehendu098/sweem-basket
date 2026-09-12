@@ -1,0 +1,287 @@
+specVersion: 1.0.0
+description: sweem — one subgraph, three lending protocols plus intrinsic yield.
+  Aave V3, Compound III (Comet) and MetaMorpho all normalize into a single
+  `Venue` entity with `supplyApy` already converted from each protocol's native
+  rate convention. Deployable to base-sepolia or base from the same manifest via
+  networks.json.
+repository: https://github.com/
+schema:
+  file: ./schema.graphql
+indexerHints:
+  prune: never
+dataSources:
+  - kind: ethereum
+    name: PoolConfigurator
+    network: base
+    source:
+      abi: PoolConfigurator
+      address: "0x5731a04B1E775f0fdd454Bf70f3335886e9A96be"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/aave.ts
+      entities:
+        - Venue
+        - AaveRegistry
+        - Reserve
+        - PriceOracle
+        - PriceOracleAsset
+      abis:
+        - name: PoolConfigurator
+          file: ./abis/PoolConfigurator.json
+        - name: Pool
+          file: ./abis/Pool.json
+        - name: PoolAddressesProvider
+          file: ./abis/PoolAddressesProvider.json
+        - name: AaveOracle
+          file: ./abis/AaveOracle.json
+        - name: AToken
+          file: ./abis/AToken.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: ReserveInitialized(indexed address,indexed
+            address,address,address,address)
+          handler: handleReserveInitialized
+  - kind: ethereum
+    name: Pool
+    network: base
+    source:
+      abi: Pool
+      address: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/aave.ts
+      entities:
+        - Venue
+        - AaveRegistry
+        - Reserve
+        - PriceOracle
+        - PriceOracleAsset
+        - ReserveHourlySnapshot
+      abis:
+        - name: Pool
+          file: ./abis/Pool.json
+        - name: PoolConfigurator
+          file: ./abis/PoolConfigurator.json
+        - name: PoolAddressesProvider
+          file: ./abis/PoolAddressesProvider.json
+        - name: AaveOracle
+          file: ./abis/AaveOracle.json
+        - name: AToken
+          file: ./abis/AToken.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: ReserveDataUpdated(indexed
+            address,uint256,uint256,uint256,uint256,uint256)
+          handler: handleReserveDataUpdated
+      blockHandlers:
+        - handler: handlePoolInit
+          filter:
+            kind: once
+  - kind: ethereum
+    name: Comet
+    network: base
+    source:
+      abi: Comet
+      address: "0xb125E6687d4313864e53df431d5425969c15Eb2F"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/comet.ts
+      entities:
+        - Venue
+        - Market
+        - MarketConfiguration
+        - MarketAccounting
+        - MarketHourlySnapshot
+        - BaseToken
+        - Token
+      abis:
+        - name: Comet
+          file: ./abis/Comet.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Supply(indexed address,indexed address,uint256)
+          handler: handleSupply
+        - event: Withdraw(indexed address,indexed address,uint256)
+          handler: handleWithdraw
+        - event: AbsorbDebt(indexed address,indexed address,uint256,uint256)
+          handler: handleAbsorbDebt
+        - event: BuyCollateral(indexed address,indexed address,uint256,uint256)
+          handler: handleBuyCollateral
+        - event: WithdrawReserves(indexed address,uint256)
+          handler: handleWithdrawReserves
+      blockHandlers:
+        - handler: handleInit
+          filter:
+            kind: once
+  - kind: ethereum
+    name: CometWeth
+    network: base
+    source:
+      abi: Comet
+      address: "0x46e6b214b524310239732D51387075E0e70970bf"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/comet.ts
+      entities:
+        - Venue
+        - Market
+        - MarketConfiguration
+        - MarketAccounting
+        - MarketHourlySnapshot
+        - BaseToken
+        - Token
+      abis:
+        - name: Comet
+          file: ./abis/Comet.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Supply(indexed address,indexed address,uint256)
+          handler: handleSupply
+        - event: Withdraw(indexed address,indexed address,uint256)
+          handler: handleWithdraw
+        - event: AbsorbDebt(indexed address,indexed address,uint256,uint256)
+          handler: handleAbsorbDebt
+        - event: BuyCollateral(indexed address,indexed address,uint256,uint256)
+          handler: handleBuyCollateral
+        - event: WithdrawReserves(indexed address,uint256)
+          handler: handleWithdrawReserves
+      blockHandlers:
+        - handler: handleInit
+          filter:
+            kind: once
+  - kind: ethereum
+    name: MetaMorphoFactory
+    network: base
+    source:
+      abi: MetaMorphoFactory
+      address: "0xA9c3D3a366466Fa809d1Ae982Fb2c46E5fC41101"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/morpho-factory.ts
+      entities:
+        - Venue
+        - Vault
+      abis:
+        - name: MetaMorphoFactory
+          file: ./abis/MetaMorphoFactory.json
+        - name: MetaMorpho
+          file: ./abis/MetaMorpho.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: CreateMetaMorpho(indexed address,indexed address,address,uint256,indexed
+            address,string,string,bytes32)
+          handler: handleCreateMetaMorpho
+      blockHandlers:
+        - handler: handleFactoryInit
+          filter:
+            kind: once
+  - kind: ethereum
+    name: MetaMorphoV1_1Factory
+    network: base
+    source:
+      abi: MetaMorphoFactory
+      address: "0xFf62A7c278C62eD665133147129245053Bbf5918"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/morpho-factory.ts
+      entities:
+        - Venue
+        - Vault
+      abis:
+        - name: MetaMorphoFactory
+          file: ./abis/MetaMorphoFactory.json
+        - name: MetaMorpho
+          file: ./abis/MetaMorpho.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: CreateMetaMorpho(indexed address,indexed address,address,uint256,indexed
+            address,string,string,bytes32)
+          handler: handleCreateMetaMorphoV1_1
+  - kind: ethereum
+    name: RateFeeds
+    network: base
+    source:
+      abi: ChainlinkAggregator
+      address: "0xB88BAc61a4Ca37C43a3725912B1f472c9A5bc061"
+      startBlock: 51214400
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/rate-feeds.ts
+      entities:
+        - Venue
+        - AssetVenues
+        - RateFeed
+        - RateFeedHourlySnapshot
+      abis:
+        - name: ChainlinkAggregator
+          file: ./abis/ChainlinkAggregator.json
+        - name: SsrOracle
+          file: ./abis/SsrOracle.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      blockHandlers:
+        - handler: handleBlock
+          filter:
+            kind: polling
+            every: 1800
+templates:
+  - kind: ethereum
+    name: MetaMorpho
+    network: base
+    source:
+      abi: MetaMorpho
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/morpho-vault.ts
+      entities:
+        - Venue
+        - Vault
+        - VaultHourlySnapshot
+        - VaultDeposit
+        - VaultWithdraw
+      abis:
+        - name: MetaMorpho
+          file: ./abis/MetaMorpho.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Deposit(indexed address,indexed address,uint256,uint256)
+          handler: handleDeposit
+        - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleWithdraw
+        - event: AccrueInterest(uint256,uint256)
+          handler: handleAccrueInterest
+        - event: UpdateLastTotalAssets(uint256)
+          handler: handleUpdateLastTotalAssets
+        - event: SetFee(indexed address,uint256)
+          handler: handleSetFee
+        - event: SetCurator(indexed address)
+          handler: handleSetCurator

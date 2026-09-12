@@ -32,8 +32,14 @@ type Basket struct {
 	Weights     []Weight `json:"weights"`
 	// Subscribed is the viewing user's own state, filled in by the API layer so
 	// the client does not need a second call to know which action to offer.
-	Subscribed bool      `json:"subscribed"`
-	CreatedAt  time.Time `json:"created_at"`
+	Subscribed bool `json:"subscribed"`
+	// CreatedByMe is the same kind of per-caller flag, and independent of it: a
+	// creator usually also subscribes to their own basket. It answers the only
+	// question the client had about creator_id, without leaking the UUID, and
+	// is absent from the public view for the same reason Subscribed is — there
+	// is no caller there.
+	CreatedByMe bool      `json:"created_by_me"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Position struct {

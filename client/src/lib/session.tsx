@@ -6,6 +6,7 @@ import {
   usePrivy,
   useSigners,
   useCreateWallet,
+  useExportWallet,
   type WalletWithMetadata,
 } from "@privy-io/react-auth";
 import {
@@ -20,7 +21,6 @@ import { ApiError, walletFetch, type Res } from "./api";
 import type { Me } from "./types";
 
 const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
-/** Key quorum wrapping the executor's authorization public key. */
 const SIGNER_ID = process.env.NEXT_PUBLIC_PRIVY_SIGNER_ID ?? "";
 const POLICY_ID = process.env.NEXT_PUBLIC_PRIVY_POLICY_ID ?? "";
 
@@ -38,6 +38,8 @@ export type Session = {
   meError: string | null;
   syncing: boolean;
   refreshMe: () => Promise<void>;
+  /** Opens Privy's export modal. The key is shown in Privy's iframe, never to us. */
+  exportWallet: () => Promise<void>;
   delegate: () => Promise<void>;
   revoke: () => Promise<void>;
   delegating: boolean;
@@ -75,6 +77,7 @@ function SessionInner({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, login, logout } = usePrivy();
   const { addSigners, removeSigners } = useSigners();
   const { createWallet } = useCreateWallet();
+  const { exportWallet } = useExportWallet();
 
   const [me, setMe] = useState<Me | null>(null);
   const [meError, setMeError] = useState<string | null>(null);
@@ -159,6 +162,11 @@ function SessionInner({ children }: { children: React.ReactNode }) {
     }
   }, [createWallet]);
 
+  const doExportWallet = useCallback(async () => {
+    if (!wallet) return;
+    await exportWallet({ address: wallet.address });
+  }, [wallet, exportWallet]);
+
   const delegate = useCallback(async () => {
     if (!wallet) return;
     if (!SIGNER_ID) {
@@ -217,6 +225,7 @@ function SessionInner({ children }: { children: React.ReactNode }) {
         meError,
         syncing,
         refreshMe,
+        exportWallet: doExportWallet,
         delegate,
         revoke,
         delegating,
@@ -245,9 +254,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         loginMethods: ["email", "wallet"],
         appearance: {
           theme: "dark",
-          accentColor: "#4ade80",
-          landingHeader: "Sign in to Basket",
+          // The brand lime, so Privy's modal matches the app it opens over.
+          accentColor: "#c4f56a",
+          landingHeader: "Sign in to sweem",
           loginMessage: "Your funds stay in your own wallet.",
+          // appearance.walletList takes WalletListEntry values — verified in
+          // node_modules/@privy-io/react-auth/dist/dts/types-B70mtFgn.d.ts
+          // (PrivyClientConfig.appearance.walletList, WalletListEntry union).
+          // Brave has no entry of its own: it injects an EVM provider, so
+          // detected_ethereum_wallets is what surfaces it. Phantom is listed
+          // under its own key and connects over its EVM provider because
+          // walletChainType is ethereum-only, which is what Base Sepolia needs.
+          walletList: [
+            "detected_ethereum_wallets",
+            "metamask",
+            "phantom",
+            "wallet_connect",
+          ],
+          walletChainType: "ethereum-only",
         },
         // Every user needs an embedded wallet: it is the account the protocol
         // routes for. Without one there is nothing to delegate.

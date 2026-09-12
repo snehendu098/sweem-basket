@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/executor"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/tokenapi"
@@ -109,16 +110,16 @@ func TestSplitAmountsSumsToTotal(t *testing.T) {
 }
 
 func TestDriftAPY(t *testing.T) {
-	pos := store.Position{VenueID: "Base:moonwell:0xaa", EntryAPY: 4.0}
+	pos := store.Position{VenueID: "base:moonwell:0xaa", EntryAPY: 4.0}
 	tests := []struct {
 		name        string
 		best        marketdata.Venue
 		wantCurrent float64
 		wantDrift   float64
 	}{
-		{"already in best venue uses the live rate", marketdata.Venue{ID: "Base:moonwell:0xaa", APY: 6.5}, 6.5, 0},
-		{"better venue elsewhere", marketdata.Venue{ID: "Base:aave-v3:0xbb", APY: 6.5}, 4.0, 2.5},
-		{"worse venue elsewhere gives negative drift", marketdata.Venue{ID: "Base:aave-v3:0xbb", APY: 3.0}, 4.0, -1.0},
+		{"already in best venue uses the live rate", marketdata.Venue{ID: "base:moonwell:0xaa", APY: 6.5}, 6.5, 0},
+		{"better venue elsewhere", marketdata.Venue{ID: "base:aave-v3:0xbb", APY: 6.5}, 4.0, 2.5},
+		{"worse venue elsewhere gives negative drift", marketdata.Venue{ID: "base:aave-v3:0xbb", APY: 3.0}, 4.0, -1.0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -358,7 +359,7 @@ func TestReconcileNeverFabricatesAValue(t *testing.T) {
 			position:   store.Position{Asset: "PEPE", AmountUSD: 600},
 			balances:   []tokenapi.Balance{{Symbol: "PEPE", Value: 600}},
 			rpc:        stubRPC{decimals: "0x" + abiWord(8), round: roundAt(100000000, fresh)},
-			wantReason: "no Chainlink price feed for PEPE on Base; value unknown",
+			wantReason: "no Chainlink price feed for PEPE on this chain; value unknown",
 		},
 		{
 			name:     "stale feed yields null, never a dollar",
@@ -387,8 +388,11 @@ func TestReconcileNeverFabricatesAValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Mainnet explicitly: these fixtures are the mainnet USDC feed,
-			// including its 24h heartbeat.
-			s := &Server{Prices: prices.New(tt.rpc, prices.ChainBaseMainnet, time.Hour, time.Minute)}
+			// including its 24h heartbeat, and the position says so.
+			tt.position.Chain = chains.LabelBaseMainnet
+			s := &Server{Prices: prices.Set{
+				prices.ChainBaseMainnet: prices.New(tt.rpc, prices.ChainBaseMainnet, time.Hour, time.Minute),
+			}}
 			got, ok, reason := s.reconcile(context.Background(), tt.position, tt.balances)
 			if tt.wantUSD == nil && got != nil {
 				t.Fatalf("onchain_usd = %v, want null", *got)
@@ -412,3 +416,20 @@ func TestReconcileNeverFabricatesAValue(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+// A position on a chain we hold no price client for must report the value as
+// unknown. Valuing it off another chain's feed would be a fabricated number.
+func TestReconcileRefusesAnUnconfiguredChain(t *testing.T) {
+	s := &Server{Prices: prices.Set{
+		prices.ChainBaseMainnet: prices.New(stubRPC{}, prices.ChainBaseMainnet, time.Hour, time.Minute),
+	}}
+	p := store.Position{Asset: "USDC", AmountUSD: 600, Chain: chains.LabelBaseSepolia}
+	usd, ok, reason := s.reconcile(context.Background(),
+		p, []tokenapi.Balance{{Symbol: "USDC", Value: 600}})
+	if usd != nil || ok {
+		t.Fatalf("valued a position on an unconfigured chain: %v", usd)
+	}
+	if reason == "" {
+		t.Fatal("no reason given")
+	}
+}

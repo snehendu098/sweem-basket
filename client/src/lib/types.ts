@@ -17,18 +17,50 @@ export type Me = {
 /** store.Weight */
 export type Weight = { asset: string; weight_bps: number };
 
-/** store.Basket */
-export type Basket = {
+/**
+ * The fields every basket view renders. The unauthenticated /public/baskets
+ * endpoint carries exactly these; the authed /v1/baskets adds the rest.
+ */
+export type BasketSummary = {
   id: string;
-  creator_id: string;
   name: string;
   description: string;
   chain: string;
-  is_public: boolean;
   fee_bps: number;
   weights: Weight[] | null;
   created_at: string;
+  /** Per-caller, so absent anonymously. Undefined means "not known", not false. */
+  subscribed?: boolean;
+  /**
+   * Whether the caller created this basket. Computed server-side and, like
+   * `subscribed`, per-caller — so it is absent from the public endpoints,
+   * where there is no caller. Undefined means "not known", not false.
+   *
+   * Independent of `subscribed`: creating a basket and then funding it is the
+   * normal flow, so both can be true at once.
+   */
+  created_by_me?: boolean;
 };
+
+/** store.Basket, as returned to an authenticated caller. */
+export type Basket = BasketSummary & {
+  creator_id: string;
+  is_public: boolean;
+  /** The viewing user's own subscription state, filled in by the API layer. */
+  subscribed: boolean;
+};
+
+/**
+ * "Your status" for one basket, from the two per-caller flags.
+ *
+ * Both undefined is the logged-out case: the fields do not exist, and "not
+ * joined" is a claim about a caller there isn't one of. Renders as nothing.
+ */
+export function ownership(b: BasketSummary): string | null {
+  if (b.created_by_me === undefined && b.subscribed === undefined) return null;
+  if (b.created_by_me) return b.subscribed ? "created · joined" : "created";
+  return b.subscribed ? "joined" : "not joined";
+}
 
 /** store.Position */
 export type Position = {

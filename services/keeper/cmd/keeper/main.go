@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/config"
 	"github.com/snehendu098/sweem-basket/internal/shared/httpx"
 	"github.com/snehendu098/sweem-basket/internal/shared/prices"
@@ -30,6 +31,16 @@ import (
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/rpc"
 	"github.com/snehendu098/sweem-basket/services/keeper/internal/store"
 )
+
+// rpcURL is per chain: one node cannot answer for two networks, and there is
+// deliberately no shared BASE_RPC_URL fallback.
+func rpcURL(chainID int) string {
+	def := "https://mainnet.base.org"
+	if chainID == chains.BaseSepolia {
+		def = "https://sepolia.base.org"
+	}
+	return config.GetEnv(fmt.Sprintf("BASE_RPC_URL_%d", chainID), def)
+}
 
 // venuesUpdated is the channel market-data publishes to after each poll cycle.
 const venuesUpdated = "venues:updated"
@@ -71,36 +82,45 @@ func run(log *slog.Logger, dryRunFlag bool) error {
 	}
 	defer db.Close()
 
-	// One RPC client serves both the gas pricing and the pending-execution
-	// sweeper, so both read the node named by BASE_RPC_URL — the same variable
-	// the executor uses.
-	node := rpc.New(config.GetEnv("BASE_RPC_URL", "https://sepolia.base.org"))
-	// The ETH/USD aggregator differs per chain, so it comes from the same
-	// CHAIN_ID-selected table the price service uses instead of a second constant.
-	ethUSD, _ := prices.FeedsFor(config.GetEnvInt("CHAIN_ID", prices.DefaultChainID))
-	cost := &gas.Estimator{
-		Gas: node,
-		Feed: &gas.Chainlink{
-			Caller:  node,
-			Address: config.GetEnv("CHAINLINK_ETH_USD", ethUSD["ETH"].Address),
-		},
-		Units:    uint64(config.GetEnvInt("GAS_UNITS_REBALANCE", int(gas.UnitsRebalance))),
-		MaxAge:   config.GetEnvDuration("PRICE_MAX_AGE", time.Hour),
-		CacheTTL: config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
-		// Tests and dry runs only. Never a fallback for a failed live fetch.
-		Override: config.GetEnvFloat("GAS_COST_USD", 0),
+	// One node and one gas estimator per chain. Both chains are served at once,
+	// and a position's own chain decides which pair prices it: gas price and
+	// ETH/USD both differ per chain, so borrowing one for the other is a
+	// confident wrong number, which is worse here than a missing one.
+	nodes := rpc.Set{}
+	costs := gas.Set{}
+	override := config.GetEnvFloat("GAS_COST_USD", 0)
+	for _, chainID := range chains.Supported() {
+		node := rpc.New(rpcURL(chainID))
+		nodes[chainID] = node
+		// The ETH/USD aggregator differs per chain, so it comes from the same
+		// verified table the price service uses instead of a second constant.
+		ethUSD, _ := prices.FeedsFor(chainID)
+		feed := ethUSD["ETH"].Address
+		if feed == "" {
+			return fmt.Errorf("no verified ETH/USD feed for chain %d", chainID)
+		}
+		costs[chainID] = &gas.Estimator{
+			Gas:      node,
+			Feed:     &gas.Chainlink{Caller: node, Address: feed},
+			Units:    uint64(config.GetEnvInt("GAS_UNITS_REBALANCE", int(gas.UnitsRebalance))),
+			MaxAge:   config.GetEnvDuration("PRICE_MAX_AGE", time.Hour),
+			CacheTTL: config.GetEnvDuration("PRICE_CACHE_TTL", time.Minute),
+			// Tests and dry runs only. Never a fallback for a failed live fetch.
+			Override: override,
+		}
 	}
-	if cost.Override > 0 {
+	if override > 0 {
 		log.Warn("GAS_COST_USD set: pricing rebalances off a fixed figure instead of live chain data",
-			"gas_cost_usd", cost.Override)
+			"gas_cost_usd", override)
 	}
+	log.Info("chains configured", "chains", chains.Supported())
 
 	eng := &engine.Engine{
 		Store:    db,
 		Market:   client.NewMarketData(config.GetEnv("MARKET_DATA_URL", "http://localhost:8081")),
 		Wallet:   client.NewWallet(config.GetEnv("WALLET_URL", "http://localhost:8080"), secret),
-		Cost:     cost,
-		Receipts: node,
+		Cost:     costs,
+		Receipts: nodes,
 		Log:      log,
 		Policy: policy.Params{
 			MinDriftAPY: config.GetEnvFloat("MIN_DRIFT_APY", 0.5),

@@ -10,21 +10,30 @@ mod config;
 mod privy;
 mod route;
 mod rpc;
+mod swaps;
 mod venues;
 
 use axum::{routing::get, routing::post, Json, Router};
 use serde_json::json;
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tracing::info;
 
-use crate::{auth::Authorizer, config::Config, privy::Privy, rpc::Rpc, venues::Registry};
+use crate::{
+    auth::Authorizer, config::Config, privy::Privy, rpc::Rpc, swaps::SwapRegistry,
+    venues::Registry,
+};
 
 #[derive(Clone)]
 pub struct AppState {
     pub privy: Arc<Privy>,
     pub venues: Arc<Registry>,
-    /// Read-only node used to confirm each call before the next is submitted.
-    pub rpc: Arc<Rpc>,
+    /// Allowlisted Uniswap v3 paths. A deposit into a non-USD asset buys it
+    /// here first; a path absent from this list is refused like an unknown venue.
+    pub swaps: Arc<SwapRegistry>,
+    /// Read-only node per chain, used to confirm each call before the next is
+    /// submitted. Keyed by chain id so a mainnet route is never confirmed
+    /// against a testnet node.
+    pub rpc: HashMap<u64, Arc<Rpc>>,
     pub receipt_timeout: Duration,
 }
 
@@ -47,7 +56,9 @@ async fn run() -> Result<(), String> {
     let cfg = Config::from_env()?;
     let venues = Registry::load(&cfg.venues_path)?;
     info!(count = venues.len(), path = %cfg.venues_path, "venue allowlist loaded");
-    info!(rpc = %cfg.rpc_url, receipt_timeout = ?cfg.receipt_timeout, "receipt polling configured");
+    let swaps = SwapRegistry::load(&cfg.swaps_path)?;
+    info!(count = swaps.len(), path = %cfg.swaps_path, "swap allowlist loaded");
+    info!(rpc = ?cfg.rpc_urls, receipt_timeout = ?cfg.receipt_timeout, "receipt polling configured");
 
     // A malformed key is a misconfiguration, so fail fast; an absent one is
     // legitimate for wallets with no authorization-key owner.
@@ -72,12 +83,19 @@ async fn run() -> Result<(), String> {
             authorizer,
         )),
         venues: Arc::new(venues),
-        rpc: Arc::new(Rpc::new(cfg.rpc_url.clone())),
+        swaps: Arc::new(swaps),
+        rpc: cfg
+            .rpc_urls
+            .iter()
+            .map(|(&id, url)| (id, Arc::new(Rpc::new(url.clone()))))
+            .collect(),
         receipt_timeout: cfg.receipt_timeout,
     };
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/venues", get(list_venues))
+        .route("/swaps", get(list_swaps))
         .route("/route", post(route::route))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
@@ -101,7 +119,42 @@ async fn health(
         "status": if privy_up { "ok" } else { "degraded" },
         "privy": if privy_up { "up" } else { "down" },
         "venues": state.venues.len(),
+        "swaps": state.swaps.len(),
+        "chains": state.rpc.keys().copied().collect::<Vec<_>>(),
     }))
+}
+
+/// The allowlist, read-only. The wallet service filters its routing against
+/// this so it never proposes a venue that would be refused at submission time.
+/// Optional `?chain_id=` narrows it to one chain.
+async fn list_venues(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<VenueQuery>,
+) -> Json<serde_json::Value> {
+    let venues: Vec<_> = state
+        .venues
+        .all()
+        .into_iter()
+        .filter(|v| q.chain_id.is_none_or(|id| v.chain_id == id))
+        .collect();
+    Json(json!({ "count": venues.len(), "venues": venues }))
+}
+
+/// The swap allowlist, read-only, for the same reason `/venues` is: a caller
+/// that cannot see which pairs are routable will propose legs this executor
+/// refuses at submission time — after the user has committed. Construction
+/// details (routers, quoters, hop tokens, fee tiers) stay private.
+async fn list_swaps(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<VenueQuery>,
+) -> Json<serde_json::Value> {
+    let paths = state.swaps.listing(q.chain_id);
+    Json(json!({ "count": paths.len(), "paths": paths }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct VenueQuery {
+    chain_id: Option<u64>,
 }
 
 async fn shutdown() {

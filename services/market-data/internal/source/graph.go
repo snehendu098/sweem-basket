@@ -30,6 +30,10 @@ type ProtocolAdapter interface {
 // GraphSource queries every registered adapter concurrently and merges the
 // results. One protocol failing never fails the cycle.
 type GraphSource struct {
+	// Chain every adapter in this source belongs to. One source serves exactly
+	// one chain, so a venue can never be tagged with a chain it did not come
+	// from.
+	Chain    Chain
 	Gateway  string
 	APIKey   string
 	Client   *http.Client
@@ -43,7 +47,7 @@ type GraphSource struct {
 
 // NewGraph builds a source over the given adapters. It fails loudly when the
 // API key is missing rather than silently degrading.
-func NewGraph(gateway, apiKey string, f Filter, feed PriceFeed, adapters ...ProtocolAdapter) (*GraphSource, error) {
+func NewGraph(chain Chain, gateway, apiKey string, f Filter, feed PriceFeed, adapters ...ProtocolAdapter) (*GraphSource, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("GRAPH_API_KEY is required: subgraph queries cannot be authenticated without it")
 	}
@@ -59,6 +63,7 @@ func NewGraph(gateway, apiKey string, f Filter, feed PriceFeed, adapters ...Prot
 		gateway = DefaultGatewayURL
 	}
 	return &GraphSource{
+		Chain:    chain,
 		Gateway:  strings.TrimRight(gateway, "/"),
 		APIKey:   apiKey,
 		Client:   &http.Client{Timeout: 30 * time.Second},
@@ -69,7 +74,7 @@ func NewGraph(gateway, apiKey string, f Filter, feed PriceFeed, adapters ...Prot
 	}, nil
 }
 
-func (g *GraphSource) Name() string { return "thegraph" }
+func (g *GraphSource) Name() string { return "thegraph:" + g.Chain.Label }
 
 // Fetch fans out across adapters, applies the product filter and merges.
 func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
@@ -82,13 +87,17 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 		wg.Add(1)
 		go func(a ProtocolAdapter) {
 			defer wg.Done()
-			st := Status{Protocol: a.Protocol(), SubgraphID: a.SubgraphID(), LastAttempt: time.Now().UTC()}
+			st := Status{
+				Protocol: a.Protocol(), SubgraphID: a.SubgraphID(), Source: g.Name(),
+				Chain: g.Chain.Label, ChainID: g.Chain.ID,
+				LastAttempt: time.Now().UTC(),
+			}
 
 			p := NewPricer(ctx, g.Prices)
 			venues, err := g.query(ctx, a, p)
 			if err != nil {
 				st.Error = err.Error()
-				slog.Error("subgraph query failed", "protocol", a.Protocol(), "err", err)
+				slog.Error("subgraph query failed", "protocol", a.Protocol(), "chain", g.Chain.Label, "err", err)
 				g.setStatus(st, false)
 				return
 			}
@@ -102,7 +111,8 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 			st.OK, st.Venues, st.LastSuccess = true, len(kept), st.LastAttempt
 			st.Unpriceable = p.Unpriceable()
 			g.setStatus(st, true)
-			slog.Info("subgraph query ok", "protocol", a.Protocol(), "mapped", len(venues), "kept", len(kept))
+			slog.Info("subgraph query ok", "protocol", a.Protocol(), "chain", g.Chain.Label,
+				"mapped", len(venues), "kept", len(kept))
 
 			mu.Lock()
 			out = append(out, kept...)
@@ -111,8 +121,13 @@ func (g *GraphSource) Fetch(ctx context.Context) ([]venue.Venue, error) {
 	}
 	wg.Wait()
 
+	// Stacking has to happen after the fan-out, not inside an adapter: the
+	// intrinsic rate comes from one adapter and applies to the venues of all
+	// the others. A wstETH Aave reserve is a 3.1% position, not a 0.1% one.
+	out = StackIntrinsic(out)
+
 	if len(out) == 0 && !g.anyOK() {
-		return nil, fmt.Errorf("all %d subgraph adapters failed", len(g.Adapters))
+		return nil, fmt.Errorf("all %d subgraph adapters failed on %s", len(g.Adapters), g.Chain.Label)
 	}
 	return out, nil
 }
@@ -125,7 +140,15 @@ func (g *GraphSource) Status() []Status {
 	for _, a := range g.Adapters {
 		st, ok := g.status[a.Protocol()]
 		if !ok {
-			st = Status{Protocol: a.Protocol(), SubgraphID: a.SubgraphID()}
+			st = Status{
+				Protocol: a.Protocol(), SubgraphID: a.SubgraphID(), Source: g.Name(),
+				Chain: g.Chain.Label, ChainID: g.Chain.ID,
+			}
+		}
+		if st.SubgraphID == "" {
+			// Never silent: an unconfigured chain must be visible in /sources
+			// rather than looking like a chain that simply has no venues.
+			st.Error = "no subgraph id configured for " + SubgraphEnvKey(protocolPrefix(a.Protocol()), g.Chain)
 		}
 		out = append(out, st)
 	}
@@ -155,6 +178,24 @@ func (g *GraphSource) anyOK() bool {
 	return false
 }
 
+// url resolves a configured subgraph id. A full URL is used verbatim: Studio
+// deployments carry an account path and a version, while the decentralized
+// gateway takes a bare deployment id appended to its base. One source can
+// therefore mix the two, which is exactly what serving mainnet (public, on the
+// gateway) and Sepolia (ours, on Studio) at the same time requires.
+func (g *GraphSource) url(subgraphID string) string {
+	return SubgraphURL(g.Gateway, subgraphID)
+}
+
+// SubgraphURL applies that rule for callers outside a GraphSource (the venue
+// generator), so the two can never disagree about where a deployment lives.
+func SubgraphURL(gateway, subgraphID string) string {
+	if strings.HasPrefix(subgraphID, "http") {
+		return subgraphID
+	}
+	return strings.TrimRight(gateway, "/") + "/" + subgraphID
+}
+
 type graphResponse struct {
 	Data   json.RawMessage `json:"data"`
 	Errors []struct {
@@ -164,14 +205,13 @@ type graphResponse struct {
 
 func (g *GraphSource) query(ctx context.Context, a ProtocolAdapter, p *Pricer) ([]venue.Venue, error) {
 	if a.SubgraphID() == "" {
-		return nil, errors.New("no subgraph id configured")
+		return nil, errors.New("no subgraph id configured for " + SubgraphEnvKey(protocolPrefix(a.Protocol()), g.Chain))
 	}
 	body, err := json.Marshal(map[string]string{"query": a.Query()})
 	if err != nil {
 		return nil, err
 	}
-	url := g.Gateway + "/" + a.SubgraphID()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.url(a.SubgraphID()), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -199,3 +239,22 @@ func (g *GraphSource) query(ctx context.Context, a ProtocolAdapter, p *Pricer) (
 
 // nowUTC is a variable so mapper tests can pin timestamps.
 var nowUTC = func() time.Time { return time.Now().UTC() }
+
+// protocolPrefix maps a protocol name to its env-var prefix, so an error can
+// name the exact variable an operator has to set.
+func protocolPrefix(protocol string) string {
+	switch protocol {
+	case "aave-v3":
+		return "AAVE_V3"
+	case "compound-v3":
+		return "COMPOUND_V3"
+	case "moonwell":
+		return "MOONWELL"
+	case "morpho-blue":
+		return "MORPHO"
+	case ProtocolHold:
+		return "HOLD"
+	default:
+		return strings.ToUpper(strings.ReplaceAll(protocol, "-", "_"))
+	}
+}

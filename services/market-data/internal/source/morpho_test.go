@@ -19,7 +19,7 @@ func morphoFixture(t *testing.T) json.RawMessage {
 }
 
 func newMorphoTest() *MorphoBlue {
-	return NewMorphoBlue("Base", "test-id", DefaultMorphoMinWindow, DefaultMorphoMaxWindow)
+	return NewMorphoBlue("base", "test-id", DefaultMorphoMinWindow, DefaultMorphoMaxWindow)
 }
 
 // TestMorphoMapFixture pins the whole mapping: the vaults with a wide, positive,
@@ -44,7 +44,7 @@ func TestMorphoMapFixture(t *testing.T) {
 	}
 	close(t, weth.TVLUsd, 23_500_000, 1)
 	// Venue id must match executor/venues.json byte for byte, lowercase hex.
-	if want := "Base:morpho-blue:0xbeef010f9cb27031ad51e3333f9af9c6b1228183"; v.ID != want {
+	if want := "base:morpho-blue:0xbeef010f9cb27031ad51e3333f9af9c6b1228183"; v.ID != want {
 		t.Errorf("id = %q, want %q", v.ID, want)
 	}
 	if v.Symbol != "steakUSDC" || v.Asset != "USDC" || !v.Stablecoin {
@@ -71,9 +71,9 @@ func TestMorphoMapFixture(t *testing.T) {
 func TestMorphoVenueIDsMatchExecutorAllowlist(t *testing.T) {
 	m := newMorphoTest()
 	allowlist := []string{
-		"Base:morpho-blue:0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
-		"Base:morpho-blue:0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
-		"Base:morpho-blue:0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
+		"base:morpho-blue:0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
+		"base:morpho-blue:0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+		"base:morpho-blue:0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
 	}
 	// Checksummed input from the subgraph would still have to normalize down.
 	inputs := []string{
@@ -267,8 +267,8 @@ func TestMorphoWidestWindowWins(t *testing.T) {
 // TestMorphoUnconfiguredSkipsCleanly: no MORPHO_SUBGRAPH_ID means the adapter
 // still exists (so /sources reports it) but carries no id to query.
 func TestMorphoUnconfiguredSkipsCleanly(t *testing.T) {
-	t.Setenv("MORPHO_SUBGRAPH_ID", "")
-	m := NewMorphoBlue("Base", "", 0, 0)
+	t.Setenv("MORPHO_SUBGRAPH_ID_8453", "")
+	m := NewMorphoBlue("base", "", 0, 0)
 	if m.SubgraphID() != "" {
 		t.Errorf("subgraph id = %q, want empty", m.SubgraphID())
 	}
@@ -279,7 +279,7 @@ func TestMorphoUnconfiguredSkipsCleanly(t *testing.T) {
 		t.Errorf("windows = %v/%v, want defaults", m.MinWindow, m.MaxWindow)
 	}
 	found := false
-	for _, a := range Adapters("Base") {
+	for _, a := range Adapters(Chain{Label: "base", ID: 8453}) {
 		if a.Protocol() == "morpho-blue" {
 			found = true
 		}

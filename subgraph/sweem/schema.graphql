@@ -1,0 +1,552 @@
+# ---------------------------------------------------------------------------
+# The normalized surface.
+#
+# Three protocols, three completely different rate conventions — an Aave ray,
+# a Comet per-second 1e18 factor, an ERC-4626 share price with no rate field at
+# all. `Venue` is the one entity all of them write into, with the conversion
+# already done in the mapping. A consumer that only wants "where is the yield"
+# reads `venues` and nothing else.
+# ---------------------------------------------------------------------------
+
+"""
+One routable supply venue, whatever protocol it belongs to.
+
+`id` is `<chain>:<protocol>:<pool>` and is byte-for-byte the key the executor
+allowlist uses (`executor/venues.json`), so a venue read out of here can be
+routed without any string surgery. `pool` is lowercase hex and is whatever the
+protocol addresses a supply position by:
+
+  * aave-v3     the underlying reserve asset
+  * compound-v3 the Comet proxy
+  * morpho-blue the MetaMorpho vault
+"""
+type Venue @entity(immutable: false) {
+  "<chain>:<protocol>:<pool>, e.g. Base:aave-v3:0x036cbd53842c5426634e7929541ec2318f3dcf7e"
+  id: ID!
+
+  "chain label as the router names it — `Base` for both base and base-sepolia"
+  chain: String!
+  "aave-v3 | compound-v3 | morpho-blue"
+  protocol: String!
+  "protocol-specific pool key, lowercase hex (see the type doc)"
+  pool: Bytes!
+
+  "the venue's own symbol: reserve symbol, Comet symbol (cUSDCv3), or vault symbol"
+  symbol: String!
+
+  "underlying ERC-20 that a depositor actually supplies"
+  asset: Bytes!
+  assetSymbol: String!
+  assetDecimals: Int!
+
+  """
+  Supply APY as a PERCENTAGE (5.25 == 5.25%), per-second compounded, already
+  normalized across protocols. This is the point of this subgraph.
+
+  Computed as Expm1(n * Log1p(r)) * 100 rather than (1+r)^n - 1: with a
+  per-second r of ~1e-9 the naive form loses most of its significant digits in
+  f64. Matches `services/market-data/internal/source/apy.go`.
+
+  Zero means "no trustworthy rate yet" — notably a Morpho vault with less than
+  six hours of share-price history. It never means "0% yield, route here".
+  """
+  supplyApy: BigDecimal!
+
+  """
+  Yield the ASSET earns on its own, as a percentage, with no protocol
+  interaction at all — a liquid staking token's exchange rate against its
+  underlying, or a savings-rate stablecoin's chi. Derived from `RateFeed`
+  (same annualization as the Morpho share-price path).
+
+  Kept separate from `supplyApy` on purpose: lending yield is paid by borrower
+  demand and can be gone tomorrow, staking yield is protocol issuance and is
+  far stickier. Collapsing them would throw away that distinction, which the
+  keeper's reward-discount logic needs.
+
+  0 here is only meaningful together with `intrinsicApyAvailable`. When that is
+  false, 0 means "not measured", NOT "this asset earns nothing".
+  """
+  intrinsicApy: BigDecimal!
+
+  """
+  Whether `intrinsicApy` was actually measured. False when the asset has no
+  rate feed, the feed call reverted, or too little history exists yet. A
+  consumer that ranks on `totalApy` while this is false is ranking on a number
+  it knows is incomplete.
+  """
+  intrinsicApyAvailable: Boolean!
+
+  """
+  supplyApy + intrinsicApy. THE field to rank venues on: Aave pays ~0.1% on
+  wstETH because nobody borrows it, but the depositor still collects the ~3%
+  staking rate underneath, and the two stack. Ranking on supplyApy alone is how
+  a 3.1% position gets "improved" into a 1.2% one.
+  """
+  totalApy: BigDecimal!
+
+  "total supplied, raw underlying units — scale by assetDecimals"
+  totalSupply: BigInt!
+
+  "borrowed / supplied, 0..1. Null for MetaMorpho, which has no borrow side of its own."
+  utilization: BigDecimal
+
+  "false for a frozen, paused or inactive market; such a venue is not routable"
+  isActive: Boolean!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+}
+
+# ---------------------------------------------------------------------------
+# Aave V3 detail. Field names deliberately mirror aave/protocol-subgraphs so
+# `services/market-data/internal/source/aave_v3.go` needs no query change.
+# ---------------------------------------------------------------------------
+
+"""
+An Aave V3 reserve — one underlying asset in the Pool. Only what a yield router
+consumes is indexed: supply rate, supply size, liveness flags and an oracle
+price. Borrow-side accounting, users, positions, e-mode and rewards are out of
+scope.
+"""
+type Reserve @entity(immutable: false) {
+  "underlying asset address, lowercase hex"
+  id: ID!
+
+  "ERC-20 metadata of the underlying"
+  symbol: String!
+  name: String!
+  decimals: Int!
+  underlyingAsset: Bytes!
+
+  "Pool that owns the reserve, and the tokens it minted for it"
+  pool: Bytes!
+  aToken: Bytes!
+  variableDebtToken: Bytes!
+
+  """
+  currentLiquidityRate: annual simple supply rate in ray (1e27 == 100%).
+  Feed straight into RayRateToAPY() in apy.go.
+  """
+  liquidityRate: BigInt!
+  "annual simple variable borrow rate, ray"
+  variableBorrowRate: BigInt!
+  liquidityIndex: BigInt!
+  variableBorrowIndex: BigInt!
+
+  "aToken.totalSupply() — total supplied, raw underlying units (scale by `decimals`)"
+  totalLiquidity: BigInt!
+  "variableDebtToken.totalSupply() — total borrowed, raw underlying units"
+  totalCurrentVariableDebt: BigInt!
+  "totalLiquidity - totalCurrentVariableDebt, raw underlying units"
+  availableLiquidity: BigInt!
+  "totalCurrentVariableDebt / totalLiquidity, 0..1"
+  utilizationRate: BigDecimal!
+
+  "decoded from the reserve configuration bitmap (bits 56, 57, 58, 60)"
+  isActive: Boolean!
+  isFrozen: Boolean!
+  isPaused: Boolean!
+  borrowingEnabled: Boolean!
+
+  price: PriceOracleAsset!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+
+  snapshots: [ReserveHourlySnapshot!]! @derivedFrom(field: "reserve")
+}
+
+"""
+Per-network Aave addresses, resolved on the fly and memoized (id `1`). The Pool
+comes from the event that carries it and the PoolAddressesProvider from
+`Pool.ADDRESSES_PROVIDER()`, so no Aave address is hardcoded in the mapping and
+the same code indexes Base Sepolia and Base mainnet.
+"""
+type AaveRegistry @entity(immutable: false) {
+  id: ID!
+  pool: Bytes!
+  addressesProvider: Bytes!
+}
+
+"""
+Latest AaveOracle quote for one reserve. `priceInEth` is the historical name in
+Aave's own schema; on V3 it is the price in the oracle's base currency (USD),
+scaled by `oracle.baseCurrencyUnit`. Kept misnamed on purpose — the consumer
+already reads it under this name.
+"""
+type PriceOracleAsset @entity(immutable: false) {
+  "asset address, lowercase hex"
+  id: ID!
+  priceInEth: BigInt!
+  oracle: PriceOracle!
+  lastUpdateTimestamp: BigInt!
+}
+
+"Singleton (id `1`) describing the oracle the addresses provider currently points at."
+type PriceOracle @entity(immutable: false) {
+  id: ID!
+  proxyAddress: Bytes!
+  "1e8 on Base Sepolia — divide priceInEth by this to get USD"
+  baseCurrencyUnit: BigInt!
+  lastUpdateTimestamp: BigInt!
+}
+
+"""
+Rate and size sampled into hourly buckets, id = <reserve>-<hourIndex>. Written
+only when the reserve is touched, so `timestamp` carries the real sample time
+and a consumer computes elapsed from the samples it actually received.
+"""
+type ReserveHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  reserve: Reserve!
+  hourIndex: Int!
+  hourStartTimestamp: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+
+  liquidityRate: BigInt!
+  variableBorrowRate: BigInt!
+  liquidityIndex: BigInt!
+  totalLiquidity: BigInt!
+  totalCurrentVariableDebt: BigInt!
+  utilizationRate: BigDecimal!
+  priceInEth: BigInt!
+
+  sampleCount: Int!
+}
+
+# ---------------------------------------------------------------------------
+# Compound III (Comet) detail. Shape mirrors the public Compound III subgraph
+# that `compound_v3.go` already queries.
+# ---------------------------------------------------------------------------
+
+"""
+One Compound III (Comet) market. Comet is a single-base-asset contract, not a
+pool of reserves, so there is exactly one Market per deployed Comet and its id
+is the Comet address.
+"""
+type Market @entity(immutable: false) {
+  "Comet proxy address, lowercase hex"
+  id: ID!
+  cometProxy: Bytes!
+  configuration: MarketConfiguration!
+  accounting: MarketAccounting!
+  creationBlockNumber: BigInt!
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+  snapshots: [MarketHourlySnapshot!]! @derivedFrom(field: "market")
+}
+
+"Static-ish market metadata. Refreshed on every touch; Comet's base asset never changes in practice."
+type MarketConfiguration @entity(immutable: false) {
+  "same id as the Market"
+  id: ID!
+  market: Market!
+  "Comet's own ERC-20 symbol, e.g. cUSDCv3"
+  symbol: String!
+  name: String!
+  baseToken: BaseToken!
+  "10^baseToken decimals"
+  baseScale: BigInt!
+  "COMP accrual speed for suppliers, scaled by trackingIndexScale"
+  baseTrackingSupplySpeed: BigInt!
+  trackingIndexScale: BigInt!
+  numAssets: Int!
+}
+
+"The base asset of a market, plus the Comet price feed used to value it."
+type BaseToken @entity(immutable: false) {
+  id: ID!
+  token: Token!
+  "Comet price feed for the base asset"
+  priceFeed: Bytes!
+  "getPrice(priceFeed), 8 decimals"
+  priceUsd: BigDecimal!
+}
+
+type Token @entity(immutable: false) {
+  "token address, lowercase hex"
+  id: ID!
+  address: Bytes!
+  symbol: String!
+  name: String!
+  decimals: Int!
+}
+
+"""
+Live market accounting. The rate fields are the reason this data source exists:
+Comet emits no rate event at all, so the rate has to be read from
+`getSupplyRate(getUtilization())` at every state change and stored.
+
+Comet's supply rate is a pure function of utilization, and utilization only
+moves when one of the indexed events fires — so an event-driven refresh is
+exact, not an approximation.
+"""
+type MarketAccounting @entity(immutable: false) {
+  "same id as the Market"
+  id: ID!
+  market: Market!
+
+  "totalSupply() — base asset supplied, raw units (scale by baseScale)"
+  totalBaseSupply: BigInt!
+  "totalBorrow() — base asset borrowed, raw units"
+  totalBaseBorrow: BigInt!
+  "USD, already scaled: totalBaseSupply / baseScale * baseToken.priceUsd"
+  totalBaseSupplyUsd: BigDecimal!
+  totalBaseBorrowUsd: BigDecimal!
+  "protocol reserves, raw base units (can be negative)"
+  reserves: BigInt!
+
+  "getUtilization(), 1e18-scaled"
+  utilization: BigInt!
+  "getSupplyRate(utilization) — per-SECOND growth rate scaled 1e18"
+  supplyRatePerSecond: BigInt!
+  "getBorrowRate(utilization) — per-SECOND, 1e18"
+  borrowRatePerSecond: BigInt!
+
+  """
+  supplyRatePerSecond / 1e18 * 31536000, as a plain decimal fraction
+  (0.000256 == 0.0256% APR). This is Compound's own "supply APR" convention and
+  is what APRToAPY() in apy.go expects.
+  """
+  supplyApr: BigDecimal!
+  borrowApr: BigDecimal!
+  "COMP emissions APR. Always 0 here — see README."
+  rewardSupplyApr: BigDecimal!
+  "supplyApr + rewardSupplyApr"
+  netSupplyApr: BigDecimal!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+}
+
+"Rate and size sampled into hourly buckets, id = <market>-<hourIndex>."
+type MarketHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  market: Market!
+  hourIndex: Int!
+  hourStartTimestamp: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+
+  totalBaseSupply: BigInt!
+  totalBaseBorrow: BigInt!
+  totalBaseSupplyUsd: BigDecimal!
+  utilization: BigInt!
+  supplyRatePerSecond: BigInt!
+  supplyApr: BigDecimal!
+  netSupplyApr: BigDecimal!
+  baseTokenPriceUsd: BigDecimal!
+
+  sampleCount: Int!
+}
+
+# ---------------------------------------------------------------------------
+# MetaMorpho (Morpho Blue) detail.
+# ---------------------------------------------------------------------------
+
+"""
+A MetaMorpho vault: the ERC-4626 wrapper a depositor actually interacts with.
+Morpho publishes no APY field — yield shows up only as share price drift, so
+`sharePriceScaled` plus the hourly series is the rate signal.
+"""
+type Vault @entity(immutable: false) {
+  "vault address, lowercase hex"
+  id: ID!
+  name: String!
+  symbol: String!
+  decimals: Int!
+
+  "underlying ERC-20"
+  asset: Bytes!
+  assetSymbol: String!
+  assetDecimals: Int!
+
+  "factory that created it, and which MetaMorpho version it is (1 or 11)"
+  factory: Bytes!
+  version: Int!
+
+  "underlying units"
+  totalAssets: BigInt!
+  "share units"
+  totalSupply: BigInt!
+
+  "totalAssets / totalSupply as a decimal. Human-readable, lossy."
+  sharePrice: BigDecimal!
+  """totalAssets * 1e36 / totalSupply. Integer, scale-free ratio: feed two of
+  these straight into SharePriceGrowthToAPY(before, after, elapsed)."""
+  sharePriceScaled: BigInt!
+
+  """
+  Oldest share-price sample still inside the APY window, and when it was taken.
+  The mapping annualizes (current / anchor) to fill Venue.supplyApy, and
+  re-anchors once the window passes 24h so the rate stays current rather than
+  averaging the vault's whole life. Exposed because a rate you cannot audit is
+  a rate you should not route on.
+  """
+  anchorSharePriceScaled: BigInt!
+  anchorTimestamp: BigInt!
+  "supply APY percent derived from (anchor -> current). 0 until 6h of history exists."
+  supplyApy: BigDecimal!
+
+  curator: Bytes
+  owner: Bytes
+  "performance fee, WAD (1e18 == 100%)"
+  fee: BigInt
+
+  "cumulative flow, underlying units"
+  cumulativeDeposited: BigInt!
+  cumulativeWithdrawn: BigInt!
+  depositCount: BigInt!
+  withdrawCount: BigInt!
+
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+
+  snapshots: [VaultHourlySnapshot!]! @derivedFrom(field: "vault")
+  deposits: [VaultDeposit!]! @derivedFrom(field: "vault")
+  withdrawals: [VaultWithdraw!]! @derivedFrom(field: "vault")
+}
+
+"""
+Share price sampled into hourly buckets. id = <vault>-<hourIndex>, where
+hourIndex = timestamp / 3600. A bucket exists only if the vault saw at least
+one event in that hour; `timestamp` records when the sample was actually
+taken, so a consumer computes elapsed from the two samples it got rather than
+assuming the nominal spacing.
+"""
+type VaultHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  vault: Vault!
+  "unix timestamp / 3600"
+  hourIndex: Int!
+  "start of the bucket, unix seconds"
+  hourStartTimestamp: BigInt!
+  "timestamp of the last sample folded into this bucket"
+  timestamp: BigInt!
+  block: BigInt!
+
+  totalAssets: BigInt!
+  totalSupply: BigInt!
+  sharePrice: BigDecimal!
+  sharePriceScaled: BigInt!
+
+  "samples folded into this bucket"
+  sampleCount: Int!
+}
+
+type VaultDeposit @entity(immutable: true) {
+  id: ID!
+  vault: Vault!
+  sender: Bytes!
+  owner: Bytes!
+  "underlying units"
+  assets: BigInt!
+  "share units"
+  shares: BigInt!
+  block: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type VaultWithdraw @entity(immutable: true) {
+  id: ID!
+  vault: Vault!
+  sender: Bytes!
+  receiver: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  block: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+
+# ---------------------------------------------------------------------------
+# Intrinsic yield.
+#
+# Every other entity here describes a LENDING position: you supply, borrowers
+# pay. Some assets earn without any protocol at all — a liquid staking token's
+# exchange rate against its underlying just rises. On Base every one of these
+# tokens is a BRIDGED representation with no rate function of its own (verified
+# by eth_call: stEthPerToken/exchangeRate/getRate all revert), so the rate is
+# read from the oracle that publishes it on this chain and sampled over time,
+# exactly the way `Vault` samples MetaMorpho share price.
+# ---------------------------------------------------------------------------
+
+"""
+One yield-bearing token whose rate is sampled on a schedule.
+
+`id` is the token address, lowercase hex, so a `Venue` can find its asset's
+intrinsic rate with a single load.
+"""
+type RateFeed @entity(immutable: false) {
+  "token address, lowercase hex"
+  id: ID!
+  token: Bytes!
+  symbol: String!
+  decimals: Int!
+
+  "contract the rate is actually read from — never the token itself on Base"
+  provider: Bytes!
+  "chainlink-exchange-rate | sky-ssr"
+  providerKind: String!
+
+  """
+  Current rate, normalized to a ray (1e27 == 1.0) whatever the provider's own
+  scale. Only the RATIO of two samples is ever used, so the scale cancels; it
+  is normalized anyway so two providers' snapshots are directly comparable.
+  """
+  rateScaled: BigInt!
+
+  "oldest sample still inside the APY window, and when it was taken"
+  anchorRateScaled: BigInt!
+  anchorTimestamp: BigInt!
+
+  "APY percent from (anchor -> current). Only meaningful when `available`."
+  intrinsicApy: BigDecimal!
+  """
+  False until a trustworthy rate exists. A rate that cannot be read is NOT
+  zero — defaulting it to zero is the exact bug this entity was added to fix.
+  """
+  available: Boolean!
+  "why `available` is false: reverted | no-anchor | window-too-short | no-growth | rate-fell"
+  unavailableReason: String
+
+  "token.totalSupply() on this chain — the TVL of simply holding it"
+  totalSupply: BigInt!
+
+  lastUpdateBlock: BigInt!
+  lastUpdateTimestamp: BigInt!
+  snapshots: [RateFeedHourlySnapshot!]! @derivedFrom(field: "feed")
+}
+
+"Rate sampled into hourly buckets, id = <token>-<hourIndex>. Same shape as VaultHourlySnapshot."
+type RateFeedHourlySnapshot @entity(immutable: false) {
+  id: ID!
+  feed: RateFeed!
+  hourIndex: Int!
+  hourStartTimestamp: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+  rateScaled: BigInt!
+  sampleCount: Int!
+}
+
+"""
+Reverse index from an asset to the venues that hold it, id = asset address.
+
+Needed because a rate feed updates on its own schedule, long after the lending
+venues in that asset were last touched: without this, an Aave wstETH reserve
+would keep serving a stale `intrinsicApy` until the next borrow. Not part of
+the public surface — `Venue` is.
+"""
+type AssetVenues @entity(immutable: false) {
+  id: ID!
+  venueIds: [String!]!
+}

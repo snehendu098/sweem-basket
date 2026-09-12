@@ -10,20 +10,29 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
 
-const (
-	KeyIndex   = "venues:index" // SET of live venue ids
-	KeyAPYKeys = "apy:keys"     // SET of live apy:* zset keys (so we can rebuild them)
-	ChanUpdate = "venues:updated"
-)
+const ChanUpdate = "venues:updated"
+
+// Every key is namespaced by chain. Two chains are published independently, so
+// one chain's subgraph outage must not take the other's venues down with it —
+// which a single global index would do, because publishing rewrites it whole.
+func KeyIndex(chain string) string { return "venues:index:" + normChain(chain) }
+
+// KeyAPYKeys tracks that chain's live apy:* zsets so they can be rebuilt.
+func KeyAPYKeys(chain string) string { return "apy:keys:" + normChain(chain) }
 
 func KeyVenue(id string) string { return "venue:" + id }
 
 func KeyAPY(chain, asset string) string {
-	return fmt.Sprintf("apy:%s:%s", chain, strings.ToUpper(asset))
+	return fmt.Sprintf("apy:%s:%s", normChain(chain), strings.ToUpper(asset))
 }
+
+// normChain makes the key schema case-insensitive: a request asking for "Base"
+// must hit the same keys the publisher wrote under "base".
+func normChain(chain string) string { return strings.ToLower(strings.TrimSpace(chain)) }
 
 type Store struct{ rdb *redis.Client }
 
@@ -31,14 +40,22 @@ func New(rdb *redis.Client) *Store { return &Store{rdb: rdb} }
 
 // UpdateMessage is the pubsub payload published after each successful cycle.
 type UpdateMessage struct {
+	Chain string    `json:"chain"`
 	Count int       `json:"count"`
 	At    time.Time `json:"at"`
 }
 
-// Publish rewrites the whole venue view in one transaction: hashes with a TTL,
-// freshly rebuilt APY zsets, and the id index.
-func (s *Store) Publish(ctx context.Context, venues []venue.Venue, ttl time.Duration) error {
-	oldZSets, err := s.rdb.SMembers(ctx, KeyAPYKeys).Result()
+// Publish rewrites one chain's venue view in a single transaction: hashes with
+// a TTL, freshly rebuilt APY zsets, and that chain's id index. A venue whose
+// own chain differs from the one being published is rejected rather than
+// written under the wrong index.
+func (s *Store) Publish(ctx context.Context, chain string, venues []venue.Venue, ttl time.Duration) error {
+	for _, v := range venues {
+		if !strings.EqualFold(v.Chain, chain) {
+			return fmt.Errorf("venue %s is on %s, refusing to publish it under %s", v.ID, v.Chain, chain)
+		}
+	}
+	oldZSets, err := s.rdb.SMembers(ctx, KeyAPYKeys(chain)).Result()
 	if err != nil && err != redis.Nil {
 		return fmt.Errorf("read apy key set: %w", err)
 	}
@@ -47,7 +64,7 @@ func (s *Store) Publish(ctx context.Context, venues []venue.Venue, ttl time.Dura
 	if len(oldZSets) > 0 {
 		pipe.Del(ctx, oldZSets...)
 	}
-	pipe.Del(ctx, KeyIndex, KeyAPYKeys)
+	pipe.Del(ctx, KeyIndex(chain), KeyAPYKeys(chain))
 
 	ids := make([]any, 0, len(venues))
 	zsets := map[string]bool{}
@@ -69,18 +86,18 @@ func (s *Store) Publish(ctx context.Context, venues []venue.Venue, ttl time.Dura
 		for k := range zsets {
 			keys = append(keys, k)
 		}
-		pipe.SAdd(ctx, KeyAPYKeys, keys...)
-		pipe.Expire(ctx, KeyAPYKeys, ttl)
+		pipe.SAdd(ctx, KeyAPYKeys(chain), keys...)
+		pipe.Expire(ctx, KeyAPYKeys(chain), ttl)
 	}
 	if len(ids) > 0 {
-		pipe.SAdd(ctx, KeyIndex, ids...)
-		pipe.Expire(ctx, KeyIndex, ttl)
+		pipe.SAdd(ctx, KeyIndex(chain), ids...)
+		pipe.Expire(ctx, KeyIndex(chain), ttl)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("exec venue pipeline: %w", err)
 	}
 
-	payload, _ := json.Marshal(UpdateMessage{Count: len(venues), At: time.Now().UTC()})
+	payload, _ := json.Marshal(UpdateMessage{Chain: chain, Count: len(venues), At: time.Now().UTC()})
 	return s.rdb.Publish(ctx, ChanUpdate, payload).Err()
 }
 
@@ -129,7 +146,21 @@ func (s *Store) ids(ctx context.Context, q Query) ([]string, error) {
 	if q.Chain != "" && q.Asset != "" {
 		return s.rdb.ZRevRange(ctx, KeyAPY(q.Chain, q.Asset), 0, -1).Result()
 	}
-	return s.rdb.SMembers(ctx, KeyIndex).Result()
+	if q.Chain != "" {
+		return s.rdb.SMembers(ctx, KeyIndex(q.Chain)).Result()
+	}
+	// No chain asked for: union every chain we serve. The per-chain filter in
+	// List still applies, so this is a superset, never a substitute.
+	var out []string
+	for _, id := range chains.Supported() {
+		label, _ := chains.Label(id)
+		ids, err := s.rdb.SMembers(ctx, KeyIndex(label)).Result()
+		if err != nil && err != redis.Nil {
+			return nil, err
+		}
+		out = append(out, ids...)
+	}
+	return out, nil
 }
 
 func (s *Store) get(ctx context.Context, ids []string) ([]venue.Venue, error) {
@@ -155,10 +186,18 @@ func (s *Store) get(ctx context.Context, ids []string) ([]venue.Venue, error) {
 	return out, nil
 }
 
-// Count returns the number of live venues.
-func (s *Store) Count(ctx context.Context) (int, error) {
-	n, err := s.rdb.SCard(ctx, KeyIndex).Result()
-	return int(n), err
+// Count returns the number of live venues per chain, keyed by chain label.
+func (s *Store) Count(ctx context.Context) (map[string]int, error) {
+	out := map[string]int{}
+	for _, id := range chains.Supported() {
+		label, _ := chains.Label(id)
+		n, err := s.rdb.SCard(ctx, KeyIndex(label)).Result()
+		if err != nil && err != redis.Nil {
+			return nil, err
+		}
+		out[label] = int(n)
+	}
+	return out, nil
 }
 
 // AssetSummary powers the basket-builder UI.

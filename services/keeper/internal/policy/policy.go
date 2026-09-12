@@ -60,8 +60,15 @@ type Decision struct {
 
 // EffectiveAPY discounts reward APY: emissions can stop tomorrow, base yield
 // cannot. discount of 0.5 says a reward point is worth half a base point.
-func EffectiveAPY(base, reward, discount float64) float64 {
-	return base + reward*discount
+//
+// intrinsic is NOT discounted. It is the asset appreciating on its own — a
+// liquid-staking exchange rate rising — which is protocol issuance, not an
+// incentive programme with an end date. Discounting it would undo the reason
+// the two fields are separate: a wstETH position earning 2.26% staking plus
+// 0.85% lending is a 3.1% position, and pricing it at 0.85% is how the keeper
+// "improves" a user into a worse venue.
+func EffectiveAPY(base, reward, intrinsic, discount float64) float64 {
+	return base + reward*discount + intrinsic
 }
 
 // Evaluate applies the guards in cheapest-first order and returns the verdict.

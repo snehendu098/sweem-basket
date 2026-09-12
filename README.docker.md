@@ -38,8 +38,9 @@ In the repo-root `.env` (gitignored, read by compose via `env_file`; never baked
 - `TOKEN_API_JWT` — Graph Token API, used for portfolio balances.
 - `KEEPER_SECRET` — required to run the keeper **live**. Unset, the keeper forces
   dry-run and submits nothing.
-- `BASE_RPC_URL` — gas and ETH price. The keeper abandons a whole pass if it cannot
-  reach this; the executor uses it to wait for receipts.
+- `BASE_RPC_URL_8453`, `BASE_RPC_URL_84532` — one node per chain: gas and ETH price for
+  the keeper, receipt polling for the executor, Chainlink reads for pricing. There is no
+  shared fallback; a read off the wrong network is a confident wrong answer.
 
 Also add the client's public vars to the root `.env` (compose passes them as build args):
 `NEXT_PUBLIC_PRIVY_APP_ID`, `NEXT_PUBLIC_PRIVY_SIGNER_ID`, `NEXT_PUBLIC_PRIVY_POLICY_ID`.
@@ -79,13 +80,20 @@ WALLET_URL       http://wallet:8080
 These change **together** — they are grouped under the `x-chain-env` anchor at the top of
 `docker-compose.yml`:
 
-- `BASE_RPC_URL` — shared by executor, wallet and keeper. Defined once, referenced four times.
-- `CHAINS`, `DEFAULT_CHAIN` — which chain the publisher polls and the wallet defaults to.
-- `MORPHO_SUBGRAPH_ID` (and any other subgraph ID vars) — deployments are per-chain.
-- `CHAINLINK_ETH_USD` — the price feed address, per-chain.
-- `executor/venues.json` — the security boundary. Its entries carry `chain_id` and target
-  addresses, so it must be swapped **and the executor image rebuilt** (`VENUES_PATH` points
-  at the copy baked into the image).
+Both chains run **at once** — `base` (8453) and `base-sepolia` (84532) — and the chain is
+chosen per request, so these are all keyed by chain id rather than swapped:
+
+- `BASE_RPC_URL_<chainid>` — one node per chain, used by executor, wallet and keeper.
+- `CHAINS` — labels the publisher polls, default `base,base-sepolia`. `DEFAULT_CHAIN` is
+  the label a basket gets when the client does not name one.
+- `<PROTOCOL>_SUBGRAPH_ID_<chainid>` — deployments are per protocol per chain. Unset means
+  unconfigured and shows up in `GET /sources`; it never falls back to another chain's id.
+  A bare id is appended to `GRAPH_GATEWAY_URL`; a value starting with `http` (Studio) is
+  used verbatim.
+- `executor/venues.json` — the security boundary, and it now carries **both** chains. Each
+  entry's id must start with its chain's label or the executor refuses to start, and a
+  route is rejected unless the venue's `chain_id` equals the request's. Editing it means
+  rebuilding the executor image (`VENUES_PATH` points at the baked-in copy).
 
 ## Common operations
 

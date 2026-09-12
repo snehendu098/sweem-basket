@@ -16,15 +16,19 @@ import (
 // Venue mirrors the market-data service's normalized venue schema. Only the
 // fields the keeper actually reasons about are kept.
 type Venue struct {
-	ID        string    `json:"id"`
-	Chain     string    `json:"chain"`
-	Project   string    `json:"project"`
-	Asset     string    `json:"asset"`
-	TVLUsd    float64   `json:"tvl_usd"`
-	APY       float64   `json:"apy"`
-	APYBase   float64   `json:"apy_base"`
-	APYReward float64   `json:"apy_reward"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string  `json:"id"`
+	Chain     string  `json:"chain"`
+	Project   string  `json:"project"`
+	Asset     string  `json:"asset"`
+	TVLUsd    float64 `json:"tvl_usd"`
+	APY       float64 `json:"apy"`
+	APYBase   float64 `json:"apy_base"`
+	APYReward float64 `json:"apy_reward"`
+	// APYIntrinsic is what the asset earns by existing — a liquid-staking
+	// exchange rate rising. It is paid by no protocol here, so it survives a
+	// rebalance only if the keeper can see it.
+	APYIntrinsic float64   `json:"apy_intrinsic"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type MarketData struct {

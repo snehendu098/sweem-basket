@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-
-	"github.com/snehendu098/sweem-basket/internal/shared/config"
+	"strings"
 
 	"github.com/snehendu098/sweem-basket/services/market-data/internal/venue"
 )
-
-// AaveV3BaseSubgraphID is the Aave V3 Base deployment on the decentralized network.
-const AaveV3BaseSubgraphID = "GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF"
 
 // AaveV3 maps Aave's `Reserve` entity onto our Venue model.
 //
@@ -31,10 +27,11 @@ type AaveV3 struct {
 	MaxMarkets int
 }
 
+// NewAaveV3 takes the subgraph id for one chain. There is deliberately no
+// default: every known id is a specific network's deployment, and substituting
+// one when unconfigured serves venues from the wrong network instead of
+// failing. An empty id reports as unconfigured.
 func NewAaveV3(chain, subgraphID string) *AaveV3 {
-	// Deliberately no fallback to AaveV3BaseSubgraphID: that is a Base *mainnet*
-	// deployment, and substituting it when unconfigured serves venues from the
-	// wrong network instead of failing. An empty id reports as unconfigured.
 	return &AaveV3{Chain: chain, ID: subgraphID, MaxMarkets: 200}
 }
 
@@ -92,7 +89,9 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 		asset := ResolveAsset([]string{r.UnderlyingAsset}, r.Symbol)
 		// A frozen, paused or inactive reserve is not a routable venue, whatever
 		// its rate says. The query filters these out; this is the belt-and-braces.
-		if !r.IsActive || r.IsFrozen || r.IsPaused || apy <= 0 {
+		// A zero rate is NOT filtered here: whether an idle-but-working market is
+		// usable is a per-chain product rule, and it lives in Filter.
+		if !r.IsActive || r.IsFrozen || r.IsPaused || apy < 0 {
 			continue
 		}
 		price := scaledFloat(r.Price.PriceInEth, r.Price.Oracle.BaseCurrencyUnit)
@@ -105,12 +104,16 @@ func (a *AaveV3) Map(p *Pricer, raw json.RawMessage) ([]venue.Venue, error) {
 				continue
 			}
 		}
+		// Lowercased, because the id is the routing key: the executor allowlist
+		// and the direct-RPC source both spell an address in lower case, and a
+		// subgraph that ever checksums one would make the venue unroutable.
+		poolID := strings.ToLower(r.ID)
 		out = append(out, venue.Venue{
-			ID:         venue.MakeID(a.Chain, a.Protocol(), r.ID),
+			ID:         venue.MakeID(a.Chain, a.Protocol(), poolID),
 			Chain:      a.Chain,
 			Project:    a.Protocol(),
 			Symbol:     r.Symbol,
-			PoolID:     r.ID,
+			PoolID:     poolID,
 			Asset:      asset,
 			TVLUsd:     supply * price,
 			APY:        apy,
@@ -152,10 +155,7 @@ func bigIntFromString(s string) *big.Int {
 }
 
 func init() {
-	Register(func(chain string) ProtocolAdapter {
-		// No default: the constant above is a Base *mainnet* ID, and falling back
-		// to it on another chain silently serves venues from the wrong network
-		// rather than failing. Unset means unconfigured, same as morpho.
-		return NewAaveV3(chain, config.GetEnv("AAVE_V3_SUBGRAPH_ID", ""))
+	Register(func(c Chain) ProtocolAdapter {
+		return NewAaveV3(c.Label, SubgraphID("AAVE_V3", c))
 	})
 }

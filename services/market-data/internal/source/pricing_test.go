@@ -174,7 +174,7 @@ func TestAavePricesZeroOracleFromFeed(t *testing.T) {
 		// No feed for GHO in this stub: dropped, not valued at its peg.
 		{"unpriceable reserve dropped", reserve("GHO", gho, "0", 18, "1000000000000000000000"), 0},
 	}
-	a := NewAaveV3("Base", "test-id")
+	a := NewAaveV3("base", "test-id")
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := a.Map(testPricer(), tc.raw)

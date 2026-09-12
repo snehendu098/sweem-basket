@@ -1,29 +1,350 @@
-[
-  {
-    "id": "Base:aave-v3:0x036cbd53842c5426634e7929541ec2318f3dcf7e",
-    "kind": "aave_v3",
-    "chain_id": 84532,
-    "target": "0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b",
-    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    "asset_decimals": 6,
-    "symbol": "USDC"
+{
+  "_generated": {
+    "by": "services/market-data/cmd/gen-venues",
+    "at": "2026-09-12T20:20:04Z",
+    "how": "go run ./services/market-data/cmd/gen-venues -out executor/venues.json",
+    "note": "GENERATED — do not edit by hand; re-run the generator or the next run drops your change.",
+    "rules": [
+      "encodable: protocol maps to a VenueKind the executor implements",
+      "priceable: underlying has a verified Chainlink feed on that chain",
+      "liquid: clears the TVL floor",
+      "verified: symbol/decimals plus a protocol identity check, on chain",
+      "id equals venue.MakeID(chain, project, pool)"
+    ]
   },
-  {
-    "id": "Base:aave-v3:0x4200000000000000000000000000000000000006",
-    "kind": "aave_v3",
-    "chain_id": 84532,
-    "target": "0x07eA79F68B2B3df564D0A34F8e19D9B1e339814b",
-    "asset": "0x4200000000000000000000000000000000000006",
-    "asset_decimals": 18,
-    "symbol": "WETH"
-  },
-  {
-    "id": "Base:compound-v3:0x571621ce60cebb0c1d442b5afb38b1663c6bf017",
-    "kind": "compound_v3",
-    "chain_id": 84532,
-    "target": "0x571621Ce60Cebb0c1D442B5afb38B1663C6Bf017",
-    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    "asset_decimals": 6,
-    "symbol": "USDC"
-  }
-]
+  "venues": [
+    {
+      "id": "base-sepolia:aave-v3:0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "kind": "aave_v3",
+      "chain_id": 84532,
+      "target": "0x07ea79f68b2b3df564d0a34f8e19d9b1e339814b",
+      "asset": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base-sepolia:aave-v3:0x4200000000000000000000000000000000000006",
+      "kind": "aave_v3",
+      "chain_id": 84532,
+      "target": "0x07ea79f68b2b3df564d0a34f8e19d9b1e339814b",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "asset_decimals": 18,
+      "symbol": "WETH"
+    },
+    {
+      "id": "base-sepolia:compound-v3:0x571621ce60cebb0c1d442b5afb38b1663c6bf017",
+      "kind": "compound_v3",
+      "chain_id": 84532,
+      "target": "0x571621ce60cebb0c1d442b5afb38b1663c6bf017",
+      "asset": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base-sepolia:compound-v3:0x61490650abaa31393464c3f34e8b29cd1c44118e",
+      "kind": "compound_v3",
+      "chain_id": 84532,
+      "target": "0x61490650abaa31393464c3f34e8b29cd1c44118e",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "asset_decimals": 18,
+      "symbol": "WETH"
+    },
+    {
+      "id": "base:aave-v3:0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "asset_decimals": 18,
+      "symbol": "weETH"
+    },
+    {
+      "id": "base:aave-v3:0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+      "asset_decimals": 18,
+      "symbol": "tBTC"
+    },
+    {
+      "id": "base:aave-v3:0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "asset_decimals": 18,
+      "symbol": "cbETH"
+    },
+    {
+      "id": "base:aave-v3:0x4200000000000000000000000000000000000006",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "asset_decimals": 18,
+      "symbol": "WETH"
+    },
+    {
+      "id": "base:aave-v3:0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+      "asset_decimals": 6,
+      "symbol": "EURC"
+    },
+    {
+      "id": "base:aave-v3:0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee",
+      "asset_decimals": 18,
+      "symbol": "GHO"
+    },
+    {
+      "id": "base:aave-v3:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:aave-v3:0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "asset_decimals": 18,
+      "symbol": "wstETH"
+    },
+    {
+      "id": "base:aave-v3:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "asset_decimals": 8,
+      "symbol": "cbBTC"
+    },
+    {
+      "id": "base:aave-v3:0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "kind": "aave_v3",
+      "chain_id": 8453,
+      "target": "0xa238dd80c259a72e81d7e4664a9801593f98d1c5",
+      "asset": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "asset_decimals": 6,
+      "symbol": "USDbC"
+    },
+    {
+      "id": "base:compound-v3:0x2c776041ccfe903071af44aa147368a9c8eea518",
+      "kind": "compound_v3",
+      "chain_id": 8453,
+      "target": "0x2c776041ccfe903071af44aa147368a9c8eea518",
+      "asset": "0x820c137fa70c8691f0e44dc420a5e53c168921dc",
+      "asset_decimals": 18,
+      "symbol": "USDS"
+    },
+    {
+      "id": "base:compound-v3:0x46e6b214b524310239732d51387075e0e70970bf",
+      "kind": "compound_v3",
+      "chain_id": 8453,
+      "target": "0x46e6b214b524310239732d51387075e0e70970bf",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "asset_decimals": 18,
+      "symbol": "WETH"
+    },
+    {
+      "id": "base:compound-v3:0x784efeb622244d2348d4f2522f8860b96fbece89",
+      "kind": "compound_v3",
+      "chain_id": 8453,
+      "target": "0x784efeb622244d2348d4f2522f8860b96fbece89",
+      "asset": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+      "asset_decimals": 18,
+      "symbol": "AERO"
+    },
+    {
+      "id": "base:compound-v3:0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf",
+      "kind": "compound_v3",
+      "chain_id": 8453,
+      "target": "0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf",
+      "asset": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "asset_decimals": 6,
+      "symbol": "USDbC"
+    },
+    {
+      "id": "base:compound-v3:0xb125e6687d4313864e53df431d5425969c15eb2f",
+      "kind": "compound_v3",
+      "chain_id": 8453,
+      "target": "0xb125e6687d4313864e53df431d5425969c15eb2f",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:hold:0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "kind": "hold",
+      "chain_id": 8453,
+      "target": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "asset": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "asset_decimals": 18,
+      "symbol": "weETH"
+    },
+    {
+      "id": "base:hold:0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "kind": "hold",
+      "chain_id": 8453,
+      "target": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "asset": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "asset_decimals": 18,
+      "symbol": "cbETH"
+    },
+    {
+      "id": "base:hold:0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "kind": "hold",
+      "chain_id": 8453,
+      "target": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "asset": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "asset_decimals": 18,
+      "symbol": "wstETH"
+    },
+    {
+      "id": "base:moonwell:0x627fe393bc6edda28e99ae648fd6ff362514304b",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0x627fe393bc6edda28e99ae648fd6ff362514304b",
+      "asset": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "asset_decimals": 18,
+      "symbol": "wstETH"
+    },
+    {
+      "id": "base:moonwell:0x73902f619ceb9b31fd8efecf435cbdf89e369ba6",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0x73902f619ceb9b31fd8efecf435cbdf89e369ba6",
+      "asset": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+      "asset_decimals": 18,
+      "symbol": "AERO"
+    },
+    {
+      "id": "base:moonwell:0x9a858ebff1beb0d3495bb0e2897c1528ed84a218",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0x9a858ebff1beb0d3495bb0e2897c1528ed84a218",
+      "asset": "0x236aa50979d5f3de3bd1eeb40e81137f22ab794b",
+      "asset_decimals": 18,
+      "symbol": "tBTC"
+    },
+    {
+      "id": "base:moonwell:0xb6419c6c2e60c4025d6d06ee4f913ce89425a357",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xb6419c6c2e60c4025d6d06ee4f913ce89425a357",
+      "asset": "0x820c137fa70c8691f0e44dc420a5e53c168921dc",
+      "asset_decimals": 18,
+      "symbol": "USDS"
+    },
+    {
+      "id": "base:moonwell:0xb682c840b5f4fc58b20769e691a6fa1305a501a2",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xb682c840b5f4fc58b20769e691a6fa1305a501a2",
+      "asset": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+      "asset_decimals": 6,
+      "symbol": "EURC"
+    },
+    {
+      "id": "base:moonwell:0xb8051464c8c92209c92f3a4cd9c73746c4c3cfb3",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xb8051464c8c92209c92f3a4cd9c73746c4c3cfb3",
+      "asset": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "asset_decimals": 18,
+      "symbol": "weETH"
+    },
+    {
+      "id": "base:moonwell:0xcb1dacd30638ae38f2b94ea64f066045b7d45f44",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xcb1dacd30638ae38f2b94ea64f066045b7d45f44",
+      "asset": "0xb6fe221fe9eef5aba221c348ba20a1bf5e73624c",
+      "asset_decimals": 18,
+      "symbol": "rETH"
+    },
+    {
+      "id": "base:moonwell:0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xedc817a28e8b93b03976fbd4a3ddbc9f7d176c22",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:moonwell:0xf877acafa28c19b96727966690b2f44d35ad5976",
+      "kind": "ctoken",
+      "chain_id": 8453,
+      "target": "0xf877acafa28c19b96727966690b2f44d35ad5976",
+      "asset": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "asset_decimals": 8,
+      "symbol": "cbBTC"
+    },
+    {
+      "id": "base:morpho-blue:0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:morpho-blue:0xa0e430870c4604ccfc7b38ca7845b1ff653d0ff1",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0xa0e430870c4604ccfc7b38ca7845b1ff653d0ff1",
+      "asset": "0x4200000000000000000000000000000000000006",
+      "asset_decimals": 18,
+      "symbol": "WETH"
+    },
+    {
+      "id": "base:morpho-blue:0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:morpho-blue:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:morpho-blue:0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    },
+    {
+      "id": "base:morpho-blue:0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+      "kind": "erc4626",
+      "chain_id": 8453,
+      "target": "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "asset_decimals": 6,
+      "symbol": "USDC"
+    }
+  ]
+}

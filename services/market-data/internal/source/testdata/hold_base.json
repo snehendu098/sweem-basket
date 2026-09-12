@@ -1,0 +1,59 @@
+{
+  "rateFeeds": [
+    {
+      "id": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
+      "symbol": "wstETH",
+      "decimals": 18,
+      "provider": "0xb88bac61a4ca37c43a3725912b1f472c9a5bc061",
+      "providerKind": "chainlink-exchange-rate",
+      "available": true,
+      "unavailableReason": null,
+      "totalSupply": "27219250972291143228143",
+      "snapshots": [
+        { "timestamp": "1789239997", "rateScaled": "1243869391109877255000000000" },
+        { "timestamp": "1788375997", "rateScaled": "1243103211881836544000000000" }
+      ]
+    },
+    {
+      "id": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "symbol": "cbETH",
+      "decimals": 18,
+      "provider": "0x868a501e68f3d1e89cfc0d22f6b22e8dabce5f04",
+      "providerKind": "chainlink-exchange-rate",
+      "available": false,
+      "unavailableReason": "reverted",
+      "totalSupply": "77343008209259882881538",
+      "snapshots": [
+        { "timestamp": "1789239997", "rateScaled": "1139249809527452561000000000" },
+        { "timestamp": "1788375997", "rateScaled": "1138511180554454286000000000" }
+      ]
+    },
+    {
+      "id": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
+      "symbol": "weETH",
+      "decimals": 18,
+      "provider": "0x35e9d7001819ea3b39da906ae6b06a62cfe2c181",
+      "providerKind": "chainlink-exchange-rate",
+      "available": true,
+      "unavailableReason": null,
+      "totalSupply": "19067723932842012434766",
+      "snapshots": [
+        { "timestamp": "1789239997", "rateScaled": "1103509465743016338000000000" }
+      ]
+    },
+    {
+      "id": "0x5875eee11cf8398102fdad704c9e96607675467a",
+      "symbol": "sUSDS",
+      "decimals": 18,
+      "provider": "0x65d946e533748a998b1f0e430803e39a6388f7a1",
+      "providerKind": "sky-ssr",
+      "available": true,
+      "unavailableReason": null,
+      "totalSupply": "10829128842209047357151231",
+      "snapshots": [
+        { "timestamp": "1789239997", "rateScaled": "1109325640849094452785982689" },
+        { "timestamp": "1788375997", "rateScaled": "1108253262058084318283148220" }
+      ]
+    }
+  ]
+}

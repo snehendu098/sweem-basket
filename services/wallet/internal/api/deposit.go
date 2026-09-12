@@ -99,7 +99,7 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 		}
 		// Price first. Routing money on an asset we cannot value means moving
 		// it on a number we invented, so an unpriceable leg never gets a venue.
-		price, perr := s.Prices.USD(r.Context(), weight.Asset)
+		price, perr := s.priceUSD(r.Context(), b.Chain, weight.Asset)
 		if perr != nil {
 			leg.Reason = priceReason(weight.Asset, perr)
 			legs = append(legs, leg)
@@ -111,16 +111,39 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			leg.AmountToken = &tokens
 		}
 
-		v, err := s.Market.Best(r.Context(), weight.Asset, b.Chain, s.MinVenueTVL)
+		// Fundability before rate. A leg whose asset cannot be bought with the
+		// deposited USDC is not a worse route, it is no route: proposing it
+		// would surface as an unlisted-path error at submission, after the user
+		// has committed.
+		if serr := s.swapFundable(r.Context(), weight.Asset, b.Chain); serr != nil {
+			if errors.Is(serr, ErrNoSwapPath) {
+				leg.Reason = fmt.Sprintf("no %s swap route to %s on %s; this leg cannot be funded",
+					QuoteAsset, weight.Asset, b.Chain)
+			} else {
+				s.Log.Warn("swap path lookup", "asset", weight.Asset, "err", serr)
+				leg.Reason = "executor swap routes unavailable; this leg cannot be funded"
+			}
+			legs = append(legs, leg)
+			continue
+		}
+
+		v, note, err := s.bestRoutable(r.Context(), weight.Asset, b.Chain)
 		switch {
 		case errors.Is(err, marketdata.ErrNoVenue):
 			leg.Reason = "no venue meets the liquidity floor; funds stay idle"
+		case errors.Is(err, ErrNoRoutableVenue):
+			// Indexed venues exist, none of them executable. Say which, rather
+			// than reporting "no venue" for something the user can see a rate for.
+			leg.Reason = "no venue for this asset can be transacted by the executor; funds stay idle"
 		case err != nil:
-			s.Log.Warn("best venue lookup", "asset", weight.Asset, "err", err)
+			s.Log.Warn("routable venue lookup", "asset", weight.Asset, "err", err)
 			leg.Reason = "market data unavailable"
 		default:
 			leg.Venue = &v
 			leg.Reason = "highest net APY above the TVL floor"
+			if note != "" {
+				leg.Reason = note
+			}
 			blended += v.APY * float64(weight.WeightBps) / float64(store.TotalBps)
 		}
 		legs = append(legs, leg)
@@ -229,6 +252,18 @@ func (s *Server) run(r *http.Request, u store.User, e store.Execution, req execu
 		s.Log.Error("create execution", "asset", e.Asset, "err", err)
 		return e, executor.RouteResponse{}, LegResult{Status: legFailed, Reason: "could not record execution; nothing was submitted"}
 	}
+	// The executor serves both chains and checks that every venue it is handed
+	// lives on the chain named here. Resolving the label once, here, is what
+	// makes that check meaningful: nothing downstream guesses a chain.
+	chainID, cerr := chainOf(req.Chain)
+	if cerr != nil {
+		s.Log.Error("unroutable chain", "chain", req.Chain, "asset", e.Asset, "err", cerr)
+		return e, executor.RouteResponse{}, LegResult{
+			Status: legFailed,
+			Reason: "basket is on an unsupported chain (" + req.Chain + "); nothing was submitted",
+		}
+	}
+	req.ChainID = chainID
 	req.ExecutionID = e.ID
 	req.UserWallet = u.WalletAddress
 	req.PrivyDID = u.PrivyDID
@@ -563,9 +598,13 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 	failed, pending, moved := 0, 0, 0
 	for _, p := range positions {
 		res := LegResult{Asset: p.Asset, AmountUSD: p.AmountUSD, FromVenueID: p.VenueID}
-		best, err := s.Market.Best(r.Context(), p.Asset, p.Chain, s.MinVenueTVL)
+		best, note, err := s.bestRoutable(r.Context(), p.Asset, p.Chain)
 		if err != nil {
-			res.Status, res.Reason = legSkipped, "no better venue available"
+			res.Status, res.Reason = legSkipped, "no better executable venue available"
+			if errors.Is(err, ErrNoRoutableVenue) {
+				res.Reason = "no venue for this asset can be transacted by the executor"
+			}
+			s.Log.Info("skip rebalance leg", "asset", p.Asset, "chain", p.Chain, "err", err)
 			results = append(results, res)
 			continue
 		}
@@ -578,6 +617,9 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		res.VenueID, res.Project, res.APY = best.ID, best.Project, best.APY
+		if note != "" {
+			res.Reason = note
+		}
 
 		// Funds already sitting idle in the wallet have nothing to withdraw —
 		// that is a plain deposit, not a venue-to-venue move.

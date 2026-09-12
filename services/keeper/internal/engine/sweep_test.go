@@ -14,7 +14,7 @@ import (
 func pendingRow(age time.Duration) store.PendingExecution {
 	return store.PendingExecution{
 		ID: "e1", UserID: "u1", BasketID: "b1", Kind: "rebalance", Asset: "USDC",
-		ToVenue: "Base:moonwell:pool", AmountUSD: 1234.5, TxHash: "0xabc",
+		ToVenue: "base:moonwell:pool", AmountUSD: 1234.5, TxHash: "0xabc",
 		CreatedAt: now.Add(-age),
 	}
 }
@@ -117,8 +117,8 @@ func TestSweepWritesPositionFromVenueID(t *testing.T) {
 	e.sweepPending(context.Background(), map[string][]client.Venue{})
 
 	got := s.upserts[0]
-	want := upsert{userID: "u1", basketID: "b1", asset: "USDC", venueID: "Base:moonwell:pool",
-		chain: "Base", project: "moonwell", amountUSD: 1234.5}
+	want := upsert{userID: "u1", basketID: "b1", asset: "USDC", venueID: "base:moonwell:pool",
+		chain: "base", project: "moonwell", amountUSD: 1234.5}
 	if got.entryAPY == nil || *got.entryAPY != 6 { // live APY of that venue, from market-data
 		t.Fatalf("entry apy %v", got.entryAPY)
 	}
@@ -131,7 +131,7 @@ func TestSweepWritesPositionFromVenueID(t *testing.T) {
 // market-data not carrying the venue must not produce an invented APY.
 func TestSweepLeavesEntryAPYAloneWhenVenueUnknown(t *testing.T) {
 	row := pendingRow(10 * time.Minute)
-	row.ToVenue = "Base:unknown:0xpool"
+	row.ToVenue = "base:unknown:0xpool"
 	r := &fakeReceipts{byHash: map[string]*rpc.Receipt{row.TxHash: {Status: "0x1"}}}
 	e, s := sweepEngine(t, &row, r)
 	e.sweepPending(context.Background(), map[string][]client.Venue{})

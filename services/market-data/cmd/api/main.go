@@ -5,16 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
-	"sync/atomic"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/snehendu098/sweem-basket/internal/shared/chains"
 	"github.com/snehendu098/sweem-basket/internal/shared/config"
 	"github.com/snehendu098/sweem-basket/internal/shared/httpx"
 	"github.com/snehendu098/sweem-basket/internal/shared/redisclient"
@@ -22,9 +25,13 @@ import (
 )
 
 type server struct {
-	rdb        *redis.Client
-	store      *store.Store
-	venueCount atomic.Int64 // kept warm by the venues:updated subscription
+	rdb   *redis.Client
+	store *store.Store
+	// counts is the per-chain live venue count, kept warm by the
+	// venues:updated subscription. Reported per chain because "42 venues" says
+	// nothing about whether mainnet is actually being served.
+	mu     sync.Mutex
+	counts map[string]int
 }
 
 func main() {
@@ -43,9 +50,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	s := &server{rdb: rdb, store: store.New(rdb)}
+	s := &server{rdb: rdb, store: store.New(rdb), counts: map[string]int{}}
 	if n, err := s.store.Count(ctx); err == nil {
-		s.venueCount.Store(int64(n))
+		s.setCounts(n)
 	}
 	go s.watchUpdates(ctx)
 
@@ -58,7 +65,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              config.GetEnv("MARKET_DATA_ADDR", ":8081"),
-		Handler:           logging(mux),
+		Handler:           httpx.CORS(config.GetEnvList("CORS_ORIGINS", []string{"http://localhost:3000"}), logging(mux)),
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -92,9 +99,28 @@ func (s *server) watchUpdates(ctx context.Context) {
 			slog.Warn("bad update payload", "payload", msg.Payload, "err", err)
 			continue
 		}
-		s.venueCount.Store(int64(u.Count))
-		slog.Info("venues updated", "count", u.Count, "at", u.At)
+		s.mu.Lock()
+		s.counts[u.Chain] = u.Count
+		s.mu.Unlock()
+		slog.Info("venues updated", "chain", u.Chain, "count", u.Count, "at", u.At)
 	}
+}
+
+func (s *server) setCounts(n map[string]int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.counts = n
+}
+
+func (s *server) venueCounts() (map[string]int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out, total := make(map[string]int, len(s.counts)), 0
+	for k, v := range s.counts {
+		out[k] = v
+		total += v
+	}
+	return out, total
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
@@ -103,12 +129,14 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	if err := s.rdb.Ping(r.Context()).Err(); err != nil {
 		status, redisState, code = "degraded", "down", http.StatusServiceUnavailable
 	} else if n, err := s.store.Count(r.Context()); err == nil {
-		s.venueCount.Store(int64(n))
+		s.setCounts(n)
 	}
+	counts, total := s.venueCounts()
 	httpx.JSON(w, code, map[string]any{
-		"status": status,
-		"redis":  redisState,
-		"venues": s.venueCount.Load(),
+		"status":          status,
+		"redis":           redisState,
+		"venues":          total,
+		"venues_by_chain": counts,
 	})
 }
 
@@ -124,9 +152,14 @@ func (s *server) venues(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, http.StatusBadRequest, "invalid_min_tvl", "min_tvl must be a number")
 		return
 	}
+	chain, err := chainParam(q.Get("chain"))
+	if err != nil {
+		httpx.Fail(w, http.StatusBadRequest, "unknown_chain", err.Error())
+		return
+	}
 
 	venues, err := s.store.List(r.Context(), store.Query{
-		Chain: q.Get("chain"), Asset: q.Get("asset"), MinTVL: minTVL, Limit: limit,
+		Chain: chain, Asset: q.Get("asset"), MinTVL: minTVL, Limit: limit,
 	})
 	if err != nil {
 		slog.Error("list venues", "err", err)
@@ -148,9 +181,14 @@ func (s *server) bestVenue(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, http.StatusBadRequest, "invalid_min_tvl", "min_tvl must be a number")
 		return
 	}
+	chain, err := chainParam(q.Get("chain"))
+	if err != nil {
+		httpx.Fail(w, http.StatusBadRequest, "unknown_chain", err.Error())
+		return
+	}
 
 	venues, err := s.store.List(r.Context(), store.Query{
-		Chain: q.Get("chain"), Asset: asset, MinTVL: minTVL, Limit: 1,
+		Chain: chain, Asset: asset, MinTVL: minTVL, Limit: 1,
 	})
 	if err != nil {
 		slog.Error("best venue", "err", err)
@@ -166,7 +204,12 @@ func (s *server) bestVenue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) assets(w http.ResponseWriter, r *http.Request) {
-	assets, err := s.store.Assets(r.Context(), r.URL.Query().Get("chain"))
+	chain, err := chainParam(r.URL.Query().Get("chain"))
+	if err != nil {
+		httpx.Fail(w, http.StatusBadRequest, "unknown_chain", err.Error())
+		return
+	}
+	assets, err := s.store.Assets(r.Context(), chain)
 	if err != nil {
 		slog.Error("list assets", "err", err)
 		httpx.Fail(w, http.StatusBadGateway, "store_unavailable", "could not read venues from redis")
@@ -177,6 +220,11 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 
 // sources exposes the per-protocol fetch status the publisher records in Redis.
 func (s *server) sources(w http.ResponseWriter, r *http.Request) {
+	chain, err := chainParam(r.URL.Query().Get("chain"))
+	if err != nil {
+		httpx.Fail(w, http.StatusBadRequest, "unknown_chain", err.Error())
+		return
+	}
 	raw, err := s.rdb.Get(r.Context(), store.KeySources).Result()
 	if errors.Is(err, redis.Nil) {
 		httpx.OK(w, map[string]any{"sources": []any{}, "count": 0})
@@ -192,7 +240,41 @@ func (s *server) sources(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, http.StatusInternalServerError, "bad_status_payload", "stored source status is not valid json")
 		return
 	}
+	statuses = filterByChain(statuses, chain)
 	httpx.OK(w, map[string]any{"sources": statuses, "count": len(statuses)})
+}
+
+// chainParam canonicalises ?chain=. Empty means every chain we serve; an
+// unrecognised label is a 400 rather than an empty result set, because an empty
+// list reads as "this chain has no venues" when it really means "you asked for
+// a chain that does not exist here".
+func chainParam(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	label, ok := chains.Normalize(raw)
+	if !ok {
+		return "", fmt.Errorf("unknown chain %q; supported: %s, %s", raw, chains.LabelBaseMainnet, chains.LabelBaseSepolia)
+	}
+	return label, nil
+}
+
+// filterByChain narrows the stored per-adapter status rows to one chain.
+func filterByChain(statuses []json.RawMessage, chain string) []json.RawMessage {
+	if chain == "" {
+		return statuses
+	}
+	out := make([]json.RawMessage, 0, len(statuses))
+	for _, raw := range statuses {
+		var row struct {
+			Chain string `json:"chain"`
+		}
+		if err := json.Unmarshal(raw, &row); err != nil || !strings.EqualFold(row.Chain, chain) {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
 }
 
 func intParam(raw string, def int) (int, error) {
