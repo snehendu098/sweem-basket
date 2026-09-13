@@ -32,7 +32,7 @@ export function BasketTableRow({
                   key={w.asset}
                   symbol={w.asset}
                   size={32}
-                  className="rounded-full ring-2 ring-background"
+                  className="rounded-full ring-2 ring-background transition-transform duration-200 ease-out hover:z-10 hover:-translate-y-1"
                 />
               ))
             ) : (

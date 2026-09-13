@@ -225,7 +225,12 @@ export default function BasketPage() {
           <div className="flex min-w-0 items-center gap-3">
             <span aria-hidden className="flex shrink-0 -space-x-2">
               {weights.slice(0, 3).map((w) => (
-                <TokenIcon key={w.asset} symbol={w.asset} size={36} />
+                <TokenIcon
+                  key={w.asset}
+                  symbol={w.asset}
+                  size={36}
+                  className="rounded-full ring-2 ring-background transition-transform duration-200 ease-out hover:z-10 hover:-translate-y-1"
+                />
               ))}
             </span>
             <div className="min-w-0">
