@@ -1,0 +1,24 @@
+# Overlay on docker-compose.yml. Two changes only: nothing but the two APIs
+# binds a host port, and they bind loopback so Caddy is the only way in.
+services:
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  executor:
+    ports: !reset []
+
+  keeper:
+    ports: !reset []
+
+  market-data-api:
+    ports: !override ["127.0.0.1:8081:8081"]
+    environment:
+      CORS_ORIGINS: "{{ ui_origin }}"
+
+  wallet:
+    ports: !override ["127.0.0.1:8080:8080"]
+    environment:
+      CORS_ORIGINS: "{{ ui_origin }}"

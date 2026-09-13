@@ -1,0 +1,199 @@
+- name: sweem backend
+  hosts: sweem
+  become: true
+
+  vars:
+    app_dir: /opt/sweem
+    # Repo root, two levels up from this playbook.
+    src_dir: "{{ playbook_dir }}/../.."
+    env_file: "{{ playbook_dir }}/../../.env"
+
+  tasks:
+    - name: Wait for cloud-init to release the apt lock
+      ansible.builtin.raw: cloud-init status --wait
+      changed_when: false
+
+    - name: Base packages
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, gnupg, rsync, debian-keyring, debian-archive-keyring, apt-transport-https]
+        update_cache: true
+
+    # A 2 GB box cannot link the Rust executor without this; a 4 GB box is
+    # comfortable but the swap costs nothing when unused.
+    - name: Swap file
+      block:
+        - ansible.builtin.command: fallocate -l 4G /swapfile
+          args: { creates: /swapfile }
+        - ansible.builtin.file: { path: /swapfile, mode: "0600" }
+        - ansible.builtin.command: mkswap /swapfile
+          register: mkswap
+          failed_when: mkswap.rc != 0 and "existing" not in mkswap.stderr
+          changed_when: mkswap.rc == 0
+        - ansible.builtin.command: swapon /swapfile
+          register: swapon
+          failed_when: swapon.rc != 0 and "already" not in swapon.stderr
+          changed_when: swapon.rc == 0
+        - ansible.posix.mount:
+            path: none
+            src: /swapfile
+            fstype: swap
+            opts: sw
+            state: present
+
+    - name: Keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Docker apt key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Docker repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: deb
+        uris: https://download.docker.com/linux/ubuntu
+        suites: "{{ ansible_distribution_release }}"
+        components: stable
+        architectures: amd64
+        signed_by: /etc/apt/keyrings/docker.asc
+
+    - name: Docker engine
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+        update_cache: true
+
+    - name: Let ubuntu run docker
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Caddy apt key
+      ansible.builtin.get_url:
+        url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+        dest: /etc/apt/keyrings/caddy.asc
+        mode: "0644"
+
+    - name: Caddy repository
+      ansible.builtin.deb822_repository:
+        name: caddy
+        types: deb
+        uris: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+        suites: any-version
+        components: main
+        signed_by: /etc/apt/keyrings/caddy.asc
+
+    - name: Caddy
+      ansible.builtin.apt:
+        name: caddy
+        update_cache: true
+
+    - name: App directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    # The client is deployed to Vercel and never built here; target/ and
+    # node_modules are rebuilt on the box.
+    - name: Sync the repo
+      ansible.posix.synchronize:
+        src: "{{ src_dir }}/"
+        dest: "{{ app_dir }}/"
+        delete: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=client"
+          - "--exclude=infra"
+          - "--exclude=executor/target"
+          - "--exclude=subgraph"
+          - "--exclude=.env"
+      become: false
+      become_user: ubuntu
+
+    # AWS credentials live in the same .env so Terraform can read them, but the
+    # instance has no business holding keys to the account that created it.
+    - name: Secrets, without the infra-only keys
+      ansible.builtin.copy:
+        content: |
+          {% for line in lookup('file', env_file).splitlines() %}
+          {% if not line is match('\\s*(AWS_|TF_VAR_|TF_TOKEN_)') %}
+          {{ line }}
+          {% endif %}
+          {% endfor %}
+        dest: "{{ app_dir }}/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+
+    - name: Production compose overlay
+      ansible.builtin.template:
+        src: compose.prod.yml.j2
+        dest: "{{ app_dir }}/docker-compose.prod.yml"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0644"
+
+    - name: Caddyfile
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: /etc/caddy/Caddyfile
+        mode: "0644"
+      notify: reload caddy
+
+    - name: Build and start
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+        chdir: "{{ app_dir }}"
+      become: false
+      become_user: ubuntu
+      register: compose
+      changed_when: true
+
+    - name: Wait for the wallet API
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/health
+        status_code: 200
+      register: wallet_health
+      until: wallet_health.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Wait for the market-data API
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/health
+        status_code: 200
+      register: market_health
+      until: market_health.status == 200
+      retries: 30
+      delay: 5
+
+    # Handlers normally run at the end of the play, after the check below.
+    - name: Apply the Caddyfile now
+      ansible.builtin.meta: flush_handlers
+
+    - name: Certificates depend on public DNS, so prove the hostnames serve TLS
+      ansible.builtin.uri:
+        url: "https://{{ item }}/health"
+        status_code: 200
+      loop:
+        - "{{ api_domain }}"
+        - "{{ market_domain }}"
+      register: tls
+      until: tls is succeeded
+      retries: 12
+      delay: 10
+
+  handlers:
+    - name: reload caddy
+      ansible.builtin.systemd:
+        name: caddy
+        state: reloaded
+        enabled: true

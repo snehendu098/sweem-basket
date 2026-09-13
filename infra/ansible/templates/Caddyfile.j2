@@ -1,0 +1,14 @@
+{
+	email {{ acme_email }}
+}
+
+# Only the two read/write APIs the browser talks to are published. The executor
+# (8082) signs transactions and the keeper (8083) can move funds: neither is
+# proxied, and neither publishes a host port.
+{{ api_domain }} {
+	reverse_proxy 127.0.0.1:8080
+}
+
+{{ market_domain }} {
+	reverse_proxy 127.0.0.1:8081
+}
