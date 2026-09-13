@@ -122,6 +122,29 @@ pub fn approve_call(venue: &Venue, amount: U256) -> Call {
     approve(venue.asset, venue.target, amount)
 }
 
+/// Skips the approve when the spender can already move this much. An
+/// unreadable allowance approves anyway: a redundant approval costs gas, a
+/// missing one fails the step that follows it.
+pub async fn approve_if_needed(
+    rpc: &crate::rpc::Rpc,
+    token: Address,
+    spender: Address,
+    owner: Address,
+    amount: U256,
+) -> Option<Call> {
+    let mut data = Vec::with_capacity(68);
+    data.extend_from_slice(&[0xdd, 0x62, 0xed, 0x3e]); // allowance(address,address)
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(owner.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(spender.as_slice());
+
+    match rpc.eth_call(&token.to_string(), &data).await {
+        Some(out) if out.len() >= 32 && U256::from_be_slice(&out[..32]) >= amount => None,
+        _ => Some(approve(token, spender, amount)),
+    }
+}
+
 pub fn approve(token: Address, spender: Address, amount: U256) -> Call {
     Call {
         to: token,

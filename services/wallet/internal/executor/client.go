@@ -68,8 +68,11 @@ type Client struct {
 
 func New(baseURL string) *Client {
 	return &Client{
-		base:     baseURL,
-		http:     &http.Client{Timeout: 60 * time.Second},
+		base: baseURL,
+		// Longer than the executor's own receipt timeout times the steps in a
+		// route: cancelling here records a leg as failed while its transaction
+		// is still confirming on chain.
+		http:     &http.Client{Timeout: 5 * time.Minute},
 		allowTTL: 5 * time.Minute,
 	}
 }

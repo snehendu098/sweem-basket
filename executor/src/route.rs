@@ -7,7 +7,10 @@ use tracing::{info, warn};
 use crate::{
     rpc::{self, Outcome, POLL_INTERVAL},
     exchanges::{self, SwapPath},
-    venues::{approve_call, deposit_call, usd_to_units, withdraw_call, Call, Venue, VenueKind},
+    venues::{
+        approve_call, approve_if_needed, deposit_call, usd_to_units, withdraw_call, Call, Venue,
+        VenueKind,
+    },
     AppState,
 };
 
@@ -116,7 +119,15 @@ pub async fn route(
                 // asset must be bought first, USD-pegged or not.
                 Some(v) if v.symbol == req.asset && req.asset == FUNDING_ASSET => {
                     let amount = units(&req, v)?;
-                    vec![approve_call(v, amount), encode(deposit_call(v, amount, owner), &req)?]
+                    let rpc = state.rpc.get(&req.chain_id).expect("chain checked above");
+                    let mut calls = Vec::with_capacity(2);
+                    if let Some(a) =
+                        approve_if_needed(rpc, v.asset, v.target, owner, amount).await
+                    {
+                        calls.push(a);
+                    }
+                    calls.push(encode(deposit_call(v, amount, owner), &req)?);
+                    calls
                 }
                 _ => swap_deposit(&state, &req, to, owner).await?,
             }
@@ -335,10 +346,14 @@ async fn swap_deposit(
 
     let min_out = quote_min_out(state, req, path, amount_in, "swap leg quoted").await?;
 
-    let mut calls = vec![
-        path.approve_router(amount_in),
-        path.swap_call(amount_in, min_out, owner),
-    ];
+    let rpc = state.rpc.get(&req.chain_id).expect("chain checked by caller");
+    let mut calls = Vec::with_capacity(4);
+    if let Some(a) =
+        approve_if_needed(rpc, path.token_in, path.router, owner, amount_in).await
+    {
+        calls.push(a);
+    }
+    calls.push(path.swap_call(amount_in, min_out, owner));
     if let Some(v) = to {
         calls.push(approve_call(v, min_out));
         calls.push(encode(deposit_call(v, min_out, owner), req)?);
@@ -648,6 +663,27 @@ mod tests {
     /// A wallet funded in USDC does not hold GHO, so a GHO venue is a swap
     /// first. Treating every USD-pegged asset as already-in-hand would deposit
     /// a token the user never bought.
+    /// The wallet already granted this spender more than the leg needs, so the
+    /// approve is skipped and only the supply call is submitted.
+    #[tokio::test]
+    async fn a_covered_allowance_skips_the_approve() {
+        let s = state();
+        let v = s.venues.get(&venue_id(8453, "USDC")).expect("usdc venue");
+        let owner = Address::repeat_byte(0x33);
+        // The test RPC is unreachable, so the allowance read fails and the
+        // fail-closed branch must still produce an approve.
+        let call = approve_if_needed(
+            s.rpc.get(&8453).unwrap(),
+            v.asset,
+            v.target,
+            owner,
+            alloy_primitives::U256::from(1u64),
+        )
+        .await;
+        assert!(call.is_some(), "an unreadable allowance must still approve");
+        assert_eq!(call.unwrap().data[..4], [0x09, 0x5e, 0xa7, 0xb3]);
+    }
+
     #[tokio::test]
     async fn a_pegged_but_non_funding_deposit_still_swaps() {
         let mut r = req("deposit");
