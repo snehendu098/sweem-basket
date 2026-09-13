@@ -229,6 +229,25 @@ func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "exited"})
 }
 
+func (s *Server) deleteBasket(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	err := s.Store.DeleteBasket(r.Context(), r.PathValue("id"), u.ID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "basket not found")
+	case errors.Is(err, store.ErrBasketInUse):
+		writeErr(w, http.StatusConflict, "this basket holds positions; withdraw before deleting it")
+	case err != nil:
+		s.Log.Error("delete basket", "err", err)
+		writeErr(w, http.StatusInternalServerError, "internal error")
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	}
+}
+
 type PlanLeg struct {
 	Asset       string            `json:"asset"`
 	WeightBps   int               `json:"weight_bps"`

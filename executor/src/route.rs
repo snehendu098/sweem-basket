@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::{
     rpc::{self, Outcome, POLL_INTERVAL},
-    swaps::{self, SwapPath},
+    exchanges::{self, SwapPath},
     venues::{approve_call, deposit_call, usd_to_units, withdraw_call, Call, Venue, VenueKind},
     AppState,
 };
@@ -112,7 +112,9 @@ pub async fn route(
     let calls: Vec<Call> = match req.action.as_str() {
         "deposit" => {
             match to {
-                Some(v) if v.symbol == req.asset && is_usd_pegged(&req.asset) => {
+                // Only the funding asset is already in the wallet. Every other
+                // asset must be bought first, USD-pegged or not.
+                Some(v) if v.symbol == req.asset && req.asset == FUNDING_ASSET => {
                     let amount = units(&req, v)?;
                     vec![approve_call(v, amount), encode(deposit_call(v, amount, owner), &req)?]
                 }
@@ -394,7 +396,7 @@ async fn quote_min_out(
     label: &'static str,
 ) -> Result<alloy_primitives::U256, (StatusCode, Json<RouteResponse>)> {
     let rpc = state.rpc.get(&req.chain_id).expect("chain checked by caller");
-    let quoted = swaps::quote(rpc, path, amount_in).await.ok_or_else(|| {
+    let quoted = exchanges::quote(rpc, path, amount_in).await.ok_or_else(|| {
         RouteResponse::upstream(
             &req.execution_id,
             format!(
@@ -404,7 +406,7 @@ async fn quote_min_out(
             ),
         )
     })?;
-    let min_out = swaps::min_out(quoted, req.max_slippage_bps);
+    let min_out = exchanges::min_out(quoted, req.max_slippage_bps);
     if min_out.is_zero() {
         return Err(RouteResponse::upstream(
             &req.execution_id,
@@ -414,7 +416,7 @@ async fn quote_min_out(
     info!(
         execution_id = %req.execution_id, path = %path.id(),
         amount_in = %amount_in, quoted = %quoted, min_out = %min_out,
-        slippage_bps = swaps::clamp_slippage(req.max_slippage_bps),
+        slippage_bps = exchanges::clamp_slippage(req.max_slippage_bps),
         "{label}"
     );
     Ok(min_out)
@@ -443,7 +445,7 @@ async fn hold_units(
             "amount_usd rounds to zero input units",
         ));
     }
-    swaps::quote(state.rpc.get(&req.chain_id).expect("chain checked by caller"), entry, usd)
+    exchanges::quote(state.rpc.get(&req.chain_id).expect("chain checked by caller"), entry, usd)
         .await
         .ok_or_else(|| {
             RouteResponse::upstream(
@@ -564,7 +566,7 @@ mod tests {
             privy: Arc::new(Privy::new("app".into(), "secret".into(), None)),
             venues: Arc::new(Registry::load("venues.json").expect("venues.json must parse")),
             swaps: Arc::new(
-                crate::swaps::SwapRegistry::load("swaps.json").expect("swaps.json must parse"),
+                crate::exchanges::SwapRegistry::load("swaps.json").expect("swaps.json must parse"),
             ),
             rpc: crate::config::CHAIN_IDS
                 .iter()
@@ -608,7 +610,7 @@ mod tests {
         assert!(err.1.error.contains("no allowlisted swap path"), "{}", err.1.error);
 
         let mut r = req("deposit");
-        r.asset = "WETH".into();
+        r.asset = "AERO".into();
         r.chain_id = 84532;
         let err = route(State(state()), Json(r)).await.unwrap_err();
         assert!(err.1.error.contains("no allowlisted swap path"), "{}", err.1.error);
@@ -643,6 +645,22 @@ mod tests {
         assert!(err.1.error.contains("could not quote"), "{}", err.1.error);
     }
 
+    /// A wallet funded in USDC does not hold GHO, so a GHO venue is a swap
+    /// first. Treating every USD-pegged asset as already-in-hand would deposit
+    /// a token the user never bought.
+    #[tokio::test]
+    async fn a_pegged_but_non_funding_deposit_still_swaps() {
+        let mut r = req("deposit");
+        r.asset = "GHO".into();
+        r.to_venue_id = venue_id(8453, "GHO");
+        let err = route(State(state()), Json(r)).await.unwrap_err();
+        assert!(
+            err.1.error.contains("could not quote") || err.1.error.contains("no allowlisted swap path"),
+            "a GHO deposit must reach the swap path, not encode a direct supply: {}",
+            err.1.error
+        );
+    }
+
     #[tokio::test]
     async fn a_venue_holding_another_asset_is_refused() {
         let mut r = req("deposit");
@@ -660,7 +678,7 @@ mod tests {
         let path = s.swaps.get(8453, "USDC", "WETH").expect("allowlisted");
         let weth = venue_id(8453, "WETH");
         let venue = s.venues.get(&weth).expect("allowlisted");
-        let min_out = crate::swaps::min_out(alloy_primitives::U256::from(1_000_000u64), 0);
+        let min_out = crate::exchanges::min_out(alloy_primitives::U256::from(1_000_000u64), 0);
         let amount_in = crate::venues::usd_to_units(100.0, path.token_in_decimals);
         let calls = vec![
             path.approve_router(amount_in),
@@ -851,7 +869,7 @@ mod tests {
         assert_eq!(parsed.action, "deposit");
         assert!(parsed.from_venue_id.is_empty());
         assert_eq!(parsed.max_slippage_bps, 50);
-        assert_eq!(crate::swaps::clamp_slippage(parsed.max_slippage_bps), 50);
+        assert_eq!(crate::exchanges::clamp_slippage(parsed.max_slippage_bps), 50);
     }
 
     #[tokio::test]

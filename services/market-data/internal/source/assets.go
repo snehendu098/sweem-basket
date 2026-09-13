@@ -39,12 +39,15 @@ var (
 		"0x0555e30da8f98308edb960aa94c0db47230d2b9c": "WBTC",
 		"0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34": "USDe",
 		"0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b": "VIRTUAL",
+		"0x63706e401c06ac8513145b7687a14804d17f814b": "AAVE",
+		"0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842": "MORPHO",
+		"0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf": "VVV",
 	}
 
 	knownAssets = []string{
 		"syrupUSDC", "USDbC", "USDC", "USDT", "USDe", "sUSDS", "USDS", "DAI", "EURC", "GHO",
 		"wstETH", "cbETH", "weETH", "wrsETH", "ezETH", "rETH", "WETH", "ETH",
-		"cbBTC", "WBTC", "tBTC", "LBTC", "AERO",
+		"cbBTC", "WBTC", "tBTC", "LBTC", "AERO", "AAVE", "MORPHO", "VVV",
 	}
 
 	canonicalSymbols = func() map[string]string {

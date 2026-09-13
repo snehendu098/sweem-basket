@@ -3,23 +3,13 @@ use alloy_sol_types::{sol, SolCall};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// Selectors are pinned by the tests in this file: reordering this block
-// silently swaps calldata between protocols.
+mod aave_v3;
+mod compound_v3;
+mod ctoken;
+mod erc4626;
+mod hold;
+
 sol! {
-    function deposit(uint256 assets, address receiver) external returns (uint256);
-    function redeem(uint256 shares, address receiver, address owner) external returns (uint256);
-    function withdraw(uint256 assets, address receiver, address owner) external returns (uint256);
-
-    function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
-    #[allow(non_snake_case)]
-    function withdraw(address asset, uint256 amount, address to) external returns (uint256);
-
-    function supplyTo(address dst, address asset, uint256 amount) external;
-    function withdrawTo(address to, address asset, uint256 amount) external;
-
-    function mint(uint256 mintAmount) external returns (uint256);
-    function redeemUnderlying(uint256 redeemAmount) external returns (uint256);
-
     function approve(address spender, uint256 amount) external returns (bool);
 }
 
@@ -141,82 +131,22 @@ pub fn approve(token: Address, spender: Address, amount: U256) -> Call {
 }
 
 pub fn deposit_call(venue: &Venue, amount: U256, owner: Address) -> Result<Call, String> {
-    let data = match venue.kind {
-        VenueKind::Erc4626 => depositCall {
-            assets: amount,
-            receiver: owner,
-        }
-        .abi_encode(),
-        VenueKind::AaveV3 => supplyCall {
-            asset: venue.asset,
-            amount,
-            onBehalfOf: owner,
-            referralCode: 0,
-        }
-        .abi_encode(),
-        VenueKind::CompoundV3 => supplyToCall {
-            dst: owner,
-            asset: venue.asset,
-            amount,
-        }
-        .abi_encode(),
-        VenueKind::CToken => mintCall { mintAmount: amount }.abi_encode(),
-        VenueKind::Hold => return Err(hold_has_no_call(venue, "deposit")),
-    };
-    Ok(Call {
-        to: venue.target,
-        data: data.into(),
-        expect: expected_event(venue, TOPIC_MINT),
-    })
+    match venue.kind {
+        VenueKind::Erc4626 => erc4626::deposit(venue, amount, owner),
+        VenueKind::AaveV3 => aave_v3::deposit(venue, amount, owner),
+        VenueKind::CompoundV3 => compound_v3::deposit(venue, amount, owner),
+        VenueKind::CToken => ctoken::deposit(venue, amount, owner),
+        VenueKind::Hold => hold::deposit(venue, amount, owner),
+    }
 }
 
 pub fn withdraw_call(venue: &Venue, amount: U256, owner: Address) -> Result<Call, String> {
-    let data = match venue.kind {
-        VenueKind::Erc4626 => withdraw_0Call {
-            assets: amount,
-            receiver: owner,
-            owner,
-        }
-        .abi_encode(),
-        VenueKind::AaveV3 => withdraw_1Call {
-            asset: venue.asset,
-            amount,
-            to: owner,
-        }
-        .abi_encode(),
-        VenueKind::CompoundV3 => withdrawToCall {
-            to: owner,
-            asset: venue.asset,
-            amount,
-        }
-        .abi_encode(),
-        VenueKind::CToken => redeemUnderlyingCall {
-            redeemAmount: amount,
-        }
-        .abi_encode(),
-        VenueKind::Hold => return Err(hold_has_no_call(venue, "withdraw")),
-    };
-    Ok(Call {
-        to: venue.target,
-        data: data.into(),
-        expect: expected_event(venue, TOPIC_REDEEM),
-    })
-}
-
-fn hold_has_no_call(venue: &Venue, action: &str) -> String {
-    format!(
-        "venue {} is a hold position: there is no {action} call, it is entered and exited by swapping {}",
-        venue.id, venue.symbol
-    )
-}
-
-fn expected_event(venue: &Venue, topic0: &'static str) -> Option<ExpectedEvent> {
     match venue.kind {
-        VenueKind::CToken => Some(ExpectedEvent {
-            address: venue.target,
-            topic0,
-        }),
-        _ => None,
+        VenueKind::Erc4626 => erc4626::withdraw(venue, amount, owner),
+        VenueKind::AaveV3 => aave_v3::withdraw(venue, amount, owner),
+        VenueKind::CompoundV3 => compound_v3::withdraw(venue, amount, owner),
+        VenueKind::CToken => ctoken::withdraw(venue, amount, owner),
+        VenueKind::Hold => hold::withdraw(venue, amount, owner),
     }
 }
 
@@ -226,87 +156,28 @@ pub fn usd_to_units(amount_usd: f64, decimals: u8) -> U256 {
 }
 
 #[cfg(test)]
+pub(crate) fn test_venue(kind: VenueKind) -> Venue {
+    Venue {
+        id: "base:morpho-blue:steakUSDC".into(),
+        kind,
+        chain_id: 8453,
+        target: Address::repeat_byte(0x11),
+        asset: Address::repeat_byte(0x22),
+        asset_decimals: 6,
+        symbol: "USDC".into(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn vault() -> Venue {
-        Venue {
-            id: "base:morpho-blue:steakUSDC".into(),
-            kind: VenueKind::Erc4626,
-            chain_id: 8453,
-            target: Address::repeat_byte(0x11),
-            asset: Address::repeat_byte(0x22),
-            asset_decimals: 6,
-            symbol: "USDC".into(),
-        }
+        test_venue(VenueKind::Erc4626)
     }
 
     fn aave() -> Venue {
-        Venue {
-            kind: VenueKind::AaveV3,
-            ..vault()
-        }
-    }
-
-    fn comet() -> Venue {
-        Venue {
-            kind: VenueKind::CompoundV3,
-            ..vault()
-        }
-    }
-
-    fn mtoken() -> Venue {
-        Venue {
-            kind: VenueKind::CToken,
-            ..vault()
-        }
-    }
-
-    #[test]
-    fn ctoken_selectors_are_canonical() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        assert_eq!(
-            deposit_call(&mtoken(), amt, owner).unwrap().data[..4],
-            [0xa0, 0x71, 0x2d, 0x68]
-        );
-        assert_eq!(
-            withdraw_call(&mtoken(), amt, owner).unwrap().data[..4],
-            [0x85, 0x2a, 0x12, 0xe3]
-        );
-    }
-
-    #[test]
-    fn ctoken_calldata_is_amount_only_and_unique() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        let d = deposit_call(&mtoken(), amt, owner).unwrap();
-        assert_eq!(d.data.len(), 36, "selector + one word");
-        assert!(
-            !d.data.windows(20).any(|w| w == owner.as_slice()),
-            "mint credits msg.sender; an owner in the calldata would mean the wrong encoding"
-        );
-        assert_eq!(d.to, mtoken().target);
-        for other in [vault(), aave(), comet()] {
-            assert_ne!(d.data[..4], deposit_call(&other, amt, owner).unwrap().data[..4]);
-        }
-    }
-
-    #[test]
-    fn ctoken_calls_demand_their_success_event() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        let d = deposit_call(&mtoken(), amt, owner).unwrap().expect.expect("mint must be verified");
-        assert_eq!(d.address, mtoken().target);
-        assert_eq!(d.topic0, TOPIC_MINT);
-        let w = withdraw_call(&mtoken(), amt, owner).unwrap().expect.expect("redeem must be verified");
-        assert_eq!(w.topic0, TOPIC_REDEEM);
-
-        for v in [vault(), aave(), comet()] {
-            assert!(deposit_call(&v, amt, owner).unwrap().expect.is_none());
-            assert!(withdraw_call(&v, amt, owner).unwrap().expect.is_none());
-        }
-        assert!(approve_call(&mtoken(), amt).expect.is_none(), "approve reverts on failure");
+        test_venue(VenueKind::AaveV3)
     }
 
     #[test]
@@ -333,6 +204,7 @@ mod tests {
         let c = approve_call(&vault(), U256::from(1u64));
         assert_eq!(c.to, vault().asset);
         assert_ne!(c.to, vault().target);
+        assert_eq!(c.data[..4], [0x09, 0x5e, 0xa7, 0xb3]);
     }
 
     #[test]
@@ -355,38 +227,6 @@ mod tests {
     fn registry_rejects_unknown_venue() {
         let r = Registry::default();
         assert!(r.get("base:evil:0xdead").is_none());
-    }
-
-    #[test]
-    fn withdraw_overloads_map_to_the_right_signatures() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        assert_eq!(
-            withdraw_call(&vault(), amt, owner).unwrap().data[..4],
-            [0xb4, 0x60, 0xaf, 0x94]
-        );
-        assert_eq!(
-            withdraw_call(&aave(), amt, owner).unwrap().data[..4],
-            [0x69, 0x32, 0x8d, 0xec]
-        );
-    }
-
-    #[test]
-    fn deposit_selectors_are_canonical() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        assert_eq!(
-            deposit_call(&vault(), amt, owner).unwrap().data[..4],
-            [0x6e, 0x55, 0x3f, 0x65]
-        );
-        assert_eq!(
-            deposit_call(&aave(), amt, owner).unwrap().data[..4],
-            [0x61, 0x7b, 0xa0, 0x37]
-        );
-        assert_eq!(
-            approve_call(&vault(), amt).data[..4],
-            [0x09, 0x5e, 0xa7, 0xb3]
-        );
     }
 
     #[test]
@@ -516,75 +356,6 @@ mod tests {
             .unwrap_err()
             .contains("unsupported chain_id"));
         std::fs::remove_file(unknown_chain).ok();
-    }
-
-    #[test]
-    fn comet_and_aave_do_not_share_selectors() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = usd_to_units(100.0, 6);
-        for (c, a) in [
-            (deposit_call(&comet(), amt, owner).unwrap(), deposit_call(&aave(), amt, owner).unwrap()),
-            (withdraw_call(&comet(), amt, owner).unwrap(), withdraw_call(&aave(), amt, owner).unwrap()),
-        ] {
-            assert_ne!(c.data[..4], a.data[..4]);
-            assert_ne!(c.data, a.data);
-        }
-    }
-
-    #[test]
-    fn comet_selectors_are_canonical() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        assert_eq!(
-            deposit_call(&comet(), amt, owner).unwrap().data[..4],
-            [0x42, 0x32, 0xcd, 0x63]
-        );
-        assert_eq!(
-            withdraw_call(&comet(), amt, owner).unwrap().data[..4],
-            [0xc3, 0xb3, 0x5a, 0x7e]
-        );
-    }
-
-    #[test]
-    fn comet_approval_targets_the_asset_with_comet_as_spender() {
-        let c = approve_call(&comet(), U256::from(7u64));
-        assert_eq!(c.to, comet().asset);
-        assert_ne!(c.to, comet().target);
-        assert!(
-            c.data.windows(20).any(|w| w == comet().target.as_slice()),
-            "the venue must be the spender"
-        );
-    }
-
-    #[test]
-    fn comet_names_the_owner_in_both_directions() {
-        let owner = Address::repeat_byte(0x33);
-        let amt = U256::from(1u64);
-        for data in [
-            deposit_call(&comet(), amt, owner).unwrap().data,
-            withdraw_call(&comet(), amt, owner).unwrap().data,
-        ] {
-            assert!(data.windows(20).any(|w| w == owner.as_slice()));
-            assert!(data.windows(20).any(|w| w == comet().asset.as_slice()));
-        }
-    }
-
-    #[test]
-    fn hold_has_no_deposit_or_withdraw_call() {
-        let hold = Venue {
-            kind: VenueKind::Hold,
-            symbol: "wstETH".into(),
-            ..vault()
-        };
-        let owner = Address::repeat_byte(0x33);
-        for r in [
-            deposit_call(&hold, U256::from(1u64), owner),
-            withdraw_call(&hold, U256::from(1u64), owner),
-        ] {
-            let err = r.expect_err("a hold venue has no protocol call");
-            assert!(err.contains("hold position"), "{err}");
-            assert!(err.contains("swapping"), "the error must name the way out: {err}");
-        }
     }
 
     #[test]

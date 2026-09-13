@@ -195,6 +195,7 @@ func (s *Server) Routes() http.Handler {
 	authed.HandleFunc("POST /v1/baskets", s.createBasket)
 	authed.HandleFunc("GET /v1/baskets", s.listBaskets)
 	authed.HandleFunc("GET /v1/baskets/{id}", s.getBasket)
+	authed.HandleFunc("DELETE /v1/baskets/{id}", s.deleteBasket)
 	authed.HandleFunc("POST /v1/baskets/{id}/subscribe", s.subscribe)
 	authed.HandleFunc("DELETE /v1/baskets/{id}/subscribe", s.unsubscribe)
 	authed.HandleFunc("GET /v1/baskets/{id}/plan", s.planBasket)

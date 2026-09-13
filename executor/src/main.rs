@@ -1,9 +1,9 @@
 mod auth;
 mod config;
+mod exchanges;
 mod privy;
 mod route;
 mod rpc;
-mod swaps;
 mod venues;
 
 use axum::{routing::get, routing::post, Json, Router};
@@ -12,7 +12,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tracing::info;
 
 use crate::{
-    auth::Authorizer, config::Config, privy::Privy, rpc::Rpc, swaps::SwapRegistry,
+    auth::Authorizer, config::Config, exchanges::SwapRegistry, privy::Privy, rpc::Rpc,
     venues::Registry,
 };
 

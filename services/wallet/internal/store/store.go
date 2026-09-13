@@ -92,6 +92,31 @@ func (s *Store) CreateBasket(ctx context.Context, b Basket) (Basket, error) {
 	return b, tx.Commit(ctx)
 }
 
+var ErrBasketInUse = errors.New("store: basket has positions")
+
+// Only an empty basket goes: a basket someone has money in is a record, not a
+// draft, and subscribers would lose theirs with it.
+func (s *Store) DeleteBasket(ctx context.Context, id, ownerID string) error {
+	var held int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM positions WHERE basket_id = $1`, id,
+	).Scan(&held); err != nil {
+		return err
+	}
+	if held > 0 {
+		return ErrBasketInUse
+	}
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM baskets WHERE id = $1 AND creator_id = $2`, id, ownerID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) Basket(ctx context.Context, id string) (Basket, error) {
 	const q = `SELECT id, creator_id, name, description, chain, is_public, fee_bps, created_at
 	           FROM baskets WHERE id = $1`

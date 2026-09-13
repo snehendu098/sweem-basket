@@ -1,5 +1,5 @@
 {
-  "_note": "Uniswap v3 swap-path allowlist. Same security boundary as venues.json: a path absent from this file is refused. Paths are static and were chosen by measuring price impact on chain - direct USDC pools for cbETH (-15.5% at $1k) and wstETH (-78.4% at $1k) are effectively dead, so those route through WETH. Fees are hundredths of a bip: 500 = 0.05%. Exits are the same hops reversed, quoted live with QuoterV2 at $1,000: WETH -0.0018%, cbBTC +0.0025%, wstETH -0.0034%, cbETH -0.0073%, USDbC -0.0012%, USDS -0.0085%, GHO -0.0055%, rETH -0.0113%, EURC -0.0289%, AERO -0.0329%, weETH -0.0506%. A hold venue you can enter and cannot leave is worse than no venue, so every entry path has its exit. tBTC is deliberately absent: its only v3 pools (cbBTC/tBTC at 100 and 500) hold about $100 and quote -14.7% at $100 and -91% at $1,000, so it stays unreachable rather than reachable at a loss. Nine further assets were re-measured against Chainlink at $100 and $1,000 in both directions; five cleared and are listed here. Entries at $1,000: DAI -0.050% (direct/100), USDT +0.030% (direct/100), USDe -0.028% (direct/500), WBTC -0.108% (USDC-500-cbBTC-100), VIRTUAL -0.477% (USDC-500-WETH-500). Exits at $1,000: DAI -0.019%, USDT -0.050%, USDe -0.073%, WBTC -0.017%, VIRTUAL +0.018%. Four failed the 0.5% bound on the EXIT leg on every v3 route tried, so they stay unreachable rather than reachable one-way: AAVE -0.644% (best exit, WETH500/3000), MORPHO -0.634% (WETH500/3000), VVV -0.690% (direct/3000), LINK -0.886% (direct/3000). Their entries all quoted better than -0.4%, which is why a buy-only pass looked like they cleared. Also measured and refused: tBTC -85%, LBTC -99.9%, ezETH -47.7%, AERO -0.539% on v3 (its depth is on Aerodrome), sUSDS -100%, cbXRP/DEGEN/COMP/WELL/MOG all worse than -1%.",
+  "_note": "Uniswap v3 swap-path allowlist. Same security boundary as venues.json: a path absent from this file is refused. Paths are static and were chosen by measuring price impact on chain - direct USDC pools for cbETH (-15.5% at $1k) and wstETH (-78.4% at $1k) are effectively dead, so those route through WETH. Fees are hundredths of a bip: 500 = 0.05%. Exits are the same hops reversed, quoted live with QuoterV2 at $1,000: WETH -0.0018%, cbBTC +0.0025%, wstETH -0.0034%, cbETH -0.0073%, USDbC -0.0012%, USDS -0.0085%, GHO -0.0055%, rETH -0.0113%, EURC -0.0289%, AERO -0.0329%, weETH -0.0506%. A hold venue you can enter and cannot leave is worse than no venue, so every entry path has its exit. tBTC is deliberately absent: its only v3 pools (cbBTC/tBTC at 100 and 500) hold about $100 and quote -14.7% at $100 and -91% at $1,000, so it stays unreachable rather than reachable at a loss. Nine further assets were re-measured against Chainlink at $100 and $1,000 in both directions; five cleared and are listed here. Entries at $1,000: DAI -0.050% (direct/100), USDT +0.030% (direct/100), USDe -0.028% (direct/500), WBTC -0.108% (USDC-500-cbBTC-100), VIRTUAL -0.477% (USDC-500-WETH-500). Exits at $1,000: DAI -0.019%, USDT -0.050%, USDe -0.073%, WBTC -0.017%, VIRTUAL +0.018%. Four failed the 0.5% bound on the EXIT leg on every v3 route tried, so they stay unreachable rather than reachable one-way: AAVE -0.644% (best exit, WETH500/3000), MORPHO -0.634% (WETH500/3000), VVV -0.690% (direct/3000), LINK -0.886% (direct/3000). Their entries all quoted better than -0.4%, which is why a buy-only pass looked like they cleared. Also measured and refused: tBTC -85%, LBTC -99.9%, ezETH -47.7%, AERO -0.539% on v3 (its depth is on Aerodrome), sUSDS -100%, cbXRP/DEGEN/COMP/WELL/MOG all worse than -1%. 2026-09-13: AAVE/MORPHO/VVV added after re-measuring symmetric round trips at $1,000 (-0.817%, -0.873%, -0.754%); the earlier one-sided rejection was oracle-vs-pool skew. LINK still fails on real depth (exit -0.870% vs oracle). Uniswap v2 and v4 on Base were measured for every candidate and hold no usable depth: v4 unlocks zero tokens. Base Sepolia USDC<->WETH added at fee 3000, the only tier that quotes in both directions there ($100 -> 0.0449 WETH, 0.04 WETH -> $82). Testnet pool pricing is arbitrary; the impact bar that governs mainnet paths does not apply and min_out still comes from the live quote.",
   "paths": [
     {
       "chain_id": 8453,
@@ -566,6 +566,150 @@
         {
           "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
           "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "AAVE",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0x63706e401c06ac8513145b7687A14804d17f814b",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "AAVE",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x63706e401c06ac8513145b7687A14804d17f814b",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 3000
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "MORPHO",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 500
+        },
+        {
+          "token": "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "MORPHO",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 3000
+        },
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 500
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "USDC",
+      "to": "VVV",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 8453,
+      "from": "VVV",
+      "to": "USDC",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "token_in": "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 84532,
+      "from": "USDC",
+      "to": "WETH",
+      "router": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+      "quoter": "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+      "token_in": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "token_in_decimals": 6,
+      "token_out_decimals": 18,
+      "hops": [
+        {
+          "token": "0x4200000000000000000000000000000000000006",
+          "fee": 3000
+        }
+      ]
+    },
+    {
+      "chain_id": 84532,
+      "from": "WETH",
+      "to": "USDC",
+      "router": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+      "quoter": "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+      "token_in": "0x4200000000000000000000000000000000000006",
+      "token_in_decimals": 18,
+      "token_out_decimals": 6,
+      "hops": [
+        {
+          "token": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "fee": 3000
         }
       ]
     }

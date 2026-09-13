@@ -195,6 +195,9 @@ async function main() {
   assert.equal(legLabel({ asset: "USDC" }), "USDC");
   // WETH already displays as ETH: an arrow to itself is noise.
   assert.equal(legLabel({ asset: "WETH", family: "ETH" }), "ETH");
+  // Landing on the funding asset converts nothing, so no arrow either.
+  assert.equal(legLabel({ asset: "USDC", family: "USD" }), "USDC");
+  assert.equal(legLabel({ asset: "USDbC", family: "USD" }), "USD → USDbC");
 
   assert.equal(displayAsset("WETH"), "ETH");
   assert.equal(displayAsset("USDC"), "USDC");

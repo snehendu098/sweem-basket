@@ -1,22 +1,29 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Background,
   BaseEdge,
-  EdgeLabelRenderer,
   Handle,
   Position,
+  Controls,
   ReactFlow,
-  getStraightPath,
+  ReactFlowProvider,
+  getSmoothStepPath,
+  useReactFlow,
   type Edge,
   type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { CircleDashed, Wallet } from "lucide-react";
-import { displayProject, fmtPct, fmtUsd, legLabel } from "@/lib/api";
+import { CircleDashed, Maximize2, Wallet, X } from "lucide-react";
+import {
+  QUOTE_ASSET,
+  displayProject,
+  fmtPct,
+  fmtUsd,
+  legLabel,
+} from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
 import type { FlowLeg } from "@/lib/types";
 
@@ -33,6 +40,7 @@ type CardData = {
   value?: string;
   note?: string;
   symbol?: string;
+  swapped?: boolean;
   project?: string;
   wallet?: boolean;
   tone?: "idle" | "muted";
@@ -56,7 +64,22 @@ function Mark({ data }: { data: CardData }) {
         <Wallet className="size-3.5" />
       </span>
     );
-  if (data.symbol) return <TokenIcon symbol={data.symbol} size={22} />;
+  if (data.symbol)
+    return (
+      <span className="relative shrink-0">
+        <TokenIcon symbol={data.symbol} size={22} />
+        {data.swapped && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src="/protocols/uniswap.png"
+            alt="swapped on Uniswap"
+            width={12}
+            height={12}
+            className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full ring-2 ring-card"
+          />
+        )}
+      </span>
+    );
   if (data.tone === "idle")
     return <CircleDashed className="size-[22px] shrink-0" />;
   const file = data.project ? PROTOCOL_MARK[data.project] : undefined;
@@ -103,51 +126,37 @@ function Card({ data }: NodeProps<CardNode>) {
         )}
       </div>
       {data.ends !== "right" && (
-        <Handle type="source" position={Position.Right} className="!opacity-0" />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!opacity-0"
+        />
       )}
     </div>
   );
 }
 
-function SwapEdge({ id, sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
-  const [path, labelX, labelY] = getStraightPath({
+function FanEdge({ id, sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
+  const [path] = getSmoothStepPath({
     sourceX,
     sourceY,
     targetX,
     targetY,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    borderRadius: 12,
   });
-  return (
-    <>
-      <BaseEdge id={id} path={path} style={style} />
-      <EdgeLabelRenderer>
-        <div
-          style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-          }}
-          className="pointer-events-none absolute grid size-6 place-items-center rounded-full bg-card"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/protocols/uniswap.png"
-            alt="swapped on Uniswap"
-            width={18}
-            height={18}
-            className="size-[18px] rounded-full"
-          />
-        </div>
-      </EdgeLabelRenderer>
-    </>
-  );
+  return <BaseEdge id={id} path={path} style={style} />;
 }
 
 const nodeTypes = { card: Card };
-const edgeTypes = { swap: SwapEdge };
+const edgeTypes = { fan: FanEdge };
 
 // Uniform height: unequal heights bow same-row edges.
-const ROW = 88;
-const HEIGHT = 64;
-const WIDTH = { basket: 150, asset: 160, venue: 180 };
-const COL = { basket: 0, asset: 200, venue: 410 };
+const ROW = 76;
+const HEIGHT = 58;
+const WIDTH = { basket: 112, asset: 160, venue: 172 };
+const COL = { basket: 0, asset: 168, venue: 348 };
 
 const defaultEdgeOptions = { type: "straight" } as const;
 
@@ -157,9 +166,18 @@ export function BasketFlow({
   swapMark,
 }: {
   legs: FlowLeg[];
-  emptyLabel: string;
+  emptyLabel?: string;
   swapMark?: boolean;
 }) {
+  const full = useRef<HTMLDialogElement>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const setFull = (open: boolean) => {
+    setExpanded(open);
+    if (open) full.current?.showModal();
+    else full.current?.close();
+  };
+
   const { nodes, edges } = useMemo(() => {
     const nodes: CardNode[] = [];
     const edges: Edge[] = [];
@@ -170,7 +188,7 @@ export function BasketFlow({
       id: "basket",
       type: "card",
       position: { x: COL.basket, y: mid },
-      data: { title: "Your wallet", wallet: true, ends: "left" },
+      data: { title: "Wallet", wallet: true, ends: "left" },
       style: { width: WIDTH.basket, height: HEIGHT },
       draggable: false,
     });
@@ -184,19 +202,24 @@ export function BasketFlow({
         position: { x: COL.asset, y },
         data: {
           title: legLabel(l),
-          ...(l.amountUsd === null
-            ? { note: "value unknown" }
-            : { value: fmtUsd(l.amountUsd) }),
-          symbol: l.asset,
+          ...(l.amountUsd !== null
+            ? { value: fmtUsd(l.amountUsd) }
+            : l.reason
+              ? { note: "value unknown" }
+              : {}),
+          symbol: l.family ?? l.asset,
+          swapped: swapMark && l.asset !== QUOTE_ASSET,
         },
         style: { width: WIDTH.asset, height: HEIGHT },
         draggable: false,
       });
+      // The funding asset is already in the wallet, so that leg is a deposit,
+      // not a swap. Mirrors the executor's own branch.
       edges.push({
         id: `e-basket-${asset}`,
         source: "basket",
         target: asset,
-        ...(swapMark ? { type: "swap" } : {}),
+        type: "fan",
       });
 
       if (l.idle) {
@@ -277,6 +300,7 @@ export function BasketFlow({
   }, [legs, swapMark]);
 
   if (legs.length === 0) {
+    if (!emptyLabel) return null;
     return (
       <div className="flex h-44 items-center justify-center px-6 text-center text-sm text-muted-foreground">
         {emptyLabel}
@@ -285,9 +309,79 @@ export function BasketFlow({
   }
 
   return (
+    <>
+      <div className="relative">
+        <ReactFlowProvider>
+          <Diagram nodes={nodes} edges={edges} height={legs.length * ROW + 28} />
+        </ReactFlowProvider>
+        <button
+          type="button"
+          onClick={() => setFull(true)}
+          aria-label="Expand the routing diagram"
+          className="absolute right-3 top-2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          <Maximize2 className="size-4" />
+        </button>
+      </div>
+
+      <dialog
+        ref={full}
+        onClose={() => setFull(false)}
+        onClick={(e) => e.target === full.current && setFull(false)}
+        aria-label="Routing diagram"
+        className="m-0 h-screen max-h-none w-screen max-w-none bg-background p-0 text-foreground backdrop:bg-black/80"
+      >
+        {expanded && (
+          <div className="relative h-full w-full">
+            <button
+              type="button"
+              onClick={() => setFull(false)}
+              aria-label="Close"
+              className="absolute right-4 top-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <X className="size-5" />
+            </button>
+            <ReactFlowProvider>
+              <Diagram nodes={nodes} edges={edges} expanded />
+            </ReactFlowProvider>
+          </div>
+        )}
+      </dialog>
+    </>
+  );
+}
+
+// fitView runs once on mount, and this panel mounts while its column is still
+// animating wider: without a refit the diagram stays at the narrow scale.
+function Diagram({
+  nodes,
+  edges,
+  height,
+  expanded,
+}: {
+  nodes: CardNode[];
+  edges: Edge[];
+  height?: number;
+  expanded?: boolean;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      void fitView({ padding: 0.08, maxZoom: 1, duration: 150 });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitView]);
+
+  return (
     <div
-      className="pb-3"
-      style={{ height: Math.max(200, legs.length * ROW + 76) }}
+      ref={box}
+      className={expanded ? "h-full w-full" : "px-2 pb-3"}
+      style={expanded ? undefined : { height }}
     >
       <ReactFlow
         nodes={nodes}
@@ -296,19 +390,21 @@ export function BasketFlow({
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
-        fitViewOptions={{ padding: 0.14 }}
+        fitViewOptions={{ padding: 0.08, maxZoom: 1 }}
+        minZoom={0.3}
+        maxZoom={expanded ? 2 : 1}
         proOptions={{ hideAttribution: true }}
-        nodesDraggable={false}
+        nodesDraggable
         nodesConnectable={false}
         elementsSelectable={false}
-        panOnDrag={false}
+        panOnDrag
         panOnScroll={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
+        zoomOnScroll={expanded}
+        zoomOnPinch={expanded}
         zoomOnDoubleClick={false}
         preventScrolling={false}
       >
-        <Background gap={20} size={1} className="opacity-40" />
+        {expanded && <Controls showInteractive={false} className="!shadow-none" />}
       </ReactFlow>
     </div>
   );

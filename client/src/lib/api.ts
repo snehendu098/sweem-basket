@@ -366,8 +366,12 @@ export const planFlowLegs = (legs: PlanLeg[] | null | undefined): FlowLeg[] =>
     reason: l.reason,
   }));
 
+// The arrow means a conversion happened. Landing on the funding asset is no
+// conversion at all, so USD resolving to USDC reads as plain USDC.
 export const legLabel = (leg: { asset: string; family?: string }): string =>
-  leg.family && displayAsset(leg.family) !== displayAsset(leg.asset)
+  leg.family &&
+  leg.asset !== QUOTE_ASSET &&
+  displayAsset(leg.family) !== displayAsset(leg.asset)
     ? `${displayAsset(leg.family)} → ${displayAsset(leg.asset)}`
     : displayAsset(leg.asset);
 

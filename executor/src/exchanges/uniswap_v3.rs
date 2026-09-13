@@ -395,8 +395,12 @@ mod tests {
         }
 
         assert!(r.listing(Some(8453)).iter().all(|l| l.chain_id == 8453));
-        assert_eq!(r.listing(Some(8453)).len(), all.len(), "all paths are on Base today");
-        assert!(r.listing(Some(84532)).is_empty(), "no paths on Base Sepolia");
+        assert!(r.listing(Some(84532)).iter().all(|l| l.chain_id == 84532));
+        assert_eq!(
+            r.listing(Some(8453)).len() + r.listing(Some(84532)).len(),
+            all.len(),
+            "every path belongs to exactly one served chain"
+        );
     }
 
     #[test]
@@ -404,14 +408,15 @@ mod tests {
         let r = registry();
         assert!(r.get(8453, "USDC", "WETH").is_some());
         assert!(r.get(8453, "USDC", "DOGE").is_none(), "unlisted asset");
-        assert!(r.get(84532, "USDC", "WETH").is_none(), "path is chain-scoped");
-        for sym in ["tBTC", "AAVE", "LINK", "MORPHO", "VVV"] {
+        assert!(r.get(84532, "USDC", "AERO").is_none(), "path is chain-scoped");
+        assert!(r.get(84532, "USDC", "WETH").is_some(), "the testnet pair is routable");
+        for sym in ["tBTC", "LINK"] {
             assert!(r.get(8453, "USDC", sym).is_none(), "{sym}: no v3 route under the impact bound");
             assert!(r.get(8453, sym, "USDC").is_none(), "{sym}: refused in both directions");
         }
         for sym in [
             "WETH", "cbBTC", "wstETH", "cbETH", "AERO", "EURC", "GHO", "USDS", "USDbC", "rETH",
-            "weETH", "DAI", "USDT", "USDe", "VIRTUAL", "WBTC",
+            "weETH", "DAI", "USDT", "USDe", "VIRTUAL", "WBTC", "AAVE", "MORPHO", "VVV",
         ] {
             let out = r.get(8453, "USDC", sym).expect("entry");
             let back = r.get(8453, sym, "USDC").expect("exit");

@@ -14,6 +14,13 @@ const MARK: Record<string, string> = {
   rETH: "reth.png",
   cbBTC: "cbbtc.png",
   tBTC: "tbtc.png",
+  BTC: "btc.png",
+  AAVE: "aave.png",
+  MORPHO: "morpho.png",
+  VIRTUAL: "virtual.png",
+  VVV: "vvv.png",
+  USD: "usdc.png",
+  EUR: "eurc.png",
 };
 
 const BRAND: Record<string, string> = {

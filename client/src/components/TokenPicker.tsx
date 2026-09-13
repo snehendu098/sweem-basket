@@ -34,6 +34,8 @@ export function TokenPicker({
   disabled,
   heading,
   placeholder,
+  mode,
+  onModeChange,
 }: {
   options: readonly PickOption[];
   tiles: readonly PickOption[];
@@ -42,6 +44,8 @@ export function TokenPicker({
   disabled?: boolean;
   heading: string;
   placeholder: string;
+  mode?: string;
+  onModeChange?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -108,9 +112,8 @@ export function TokenPicker({
             {chosen.map((o) => (
               <span
                 key={o.id}
-                className="inline-flex items-center gap-1.5 rounded-full bg-background px-2 py-0.5 text-xs font-medium"
+                className="inline-flex items-center rounded-full bg-background px-2.5 py-0.5 text-xs font-medium"
               >
-                <TokenIcon symbol={o.asset} size={16} />
                 {o.symbol}
               </span>
             ))}
@@ -131,17 +134,35 @@ export function TokenPicker({
           <Pop className="flex max-h-[min(34rem,calc(100vh-4rem))] flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
             <div className="flex items-center justify-between px-5 pt-4">
               <h2 className="text-sm font-medium">{heading}</h2>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Close"
-                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {mode && onModeChange && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={mode === "manual"}
+                    onClick={onModeChange}
+                    className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {mode === "manual" ? "Manual" : "Auto"}
+                    <span
+                      className={`ml-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                        mode === "manual" ? "bg-primary" : "bg-border"
+                      }`}
+                    />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close"
+                  className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="px-5 pt-3">
+            <div className="px-5 pt-4">
               <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/40 px-3 py-2.5 focus-within:border-foreground/30">
                 <Search className="size-4 shrink-0 text-muted-foreground" />
                 <input
@@ -166,7 +187,7 @@ export function TokenPicker({
             </div>
 
             {tiles.length > 0 && (
-              <div className="grid grid-flow-col gap-2 px-5 pt-3">
+              <div className="grid grid-flow-col gap-2.5 px-5 pt-4">
                 {tiles.map((o) => {
                   const on = values.includes(o.id);
                   return (
@@ -176,11 +197,13 @@ export function TokenPicker({
                       onClick={() => onToggle(o.id)}
                       aria-pressed={on}
                       className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-2.5 transition-colors",
-                        on ? selectedRing : "border-border hover:bg-secondary/60",
+                        "flex flex-col items-center gap-2 rounded-xl border px-2 py-3 transition-colors",
+                        on
+                          ? selectedRing
+                          : "border-border hover:bg-secondary/60",
                       )}
                     >
-                      <TokenIcon symbol={o.asset} size={26} />
+                      <TokenIcon symbol={o.symbol} size={26} />
                       <span className="w-full truncate text-center text-[11px] font-medium">
                         {o.symbol}
                       </span>
@@ -190,8 +213,10 @@ export function TokenPicker({
               </div>
             )}
 
-            <div className="mt-3 px-5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {needle ? `${rows.length} match${rows.length === 1 ? "" : "es"}` : "All tokens"}
+            <div className="mt-5 px-5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {needle
+                ? `${rows.length} match${rows.length === 1 ? "" : "es"}`
+                : "All tokens"}
             </div>
 
             <ul
@@ -199,7 +224,7 @@ export function TokenPicker({
               role="listbox"
               aria-multiselectable
               aria-label={heading}
-              className="mt-1 min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+              className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3"
             >
               {rows.length === 0 && (
                 <li className="px-3 py-6 text-center text-sm text-muted-foreground">
@@ -219,7 +244,7 @@ export function TokenPicker({
                     onClick={() => !o.disabled && onToggle(o.id)}
                     onMouseEnter={() => setCursor(i)}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left",
+                      "flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left",
                       o.disabled
                         ? "cursor-not-allowed border-transparent opacity-40"
                         : "cursor-pointer",
@@ -231,10 +256,12 @@ export function TokenPicker({
                             : "border-transparent"),
                     )}
                   >
-                    <TokenIcon symbol={o.asset} size={30} />
+                    <TokenIcon symbol={o.symbol} size={30} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-sm font-medium">{o.title}</span>
+                        <span className="truncate text-sm font-medium">
+                          {o.title}
+                        </span>
                         {!o.disabled && o.warning && (
                           <WarningMark label={o.warning} />
                         )}
