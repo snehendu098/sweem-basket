@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import {
   QUOTE_ASSET,
+  assetGroups,
   basescanAddress,
   displayAsset,
   fmtBps,
@@ -13,8 +14,10 @@ import {
   fmtTime,
   fmtUsd,
   holdingVenue,
+  marketAssets,
   planFlowLegs,
   publicBasket,
+  venueProject,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
@@ -64,6 +67,7 @@ export default function BasketPage() {
   const authedBasket = useApi<Basket>(authenticated ? `/v1/baskets/${id}` : null);
   const basket = authenticated ? authedBasket : anon;
   const portfolio = useApi<Portfolio>("/v1/portfolio");
+  const assets = useAsync(`assets:${chain.label}`, () => marketAssets());
 
   const parsed = Number(amount);
   const amountValid = Number.isFinite(parsed) && parsed > 0;
@@ -106,8 +110,29 @@ export default function BasketPage() {
         };
       });
     }
-    return planFlowLegs(plan.data?.legs);
-  }, [holdings, plan.data]);
+    if (plan.data) return planFlowLegs(plan.data.legs);
+
+    // No position and no amount typed: the basket still has a shape, so show
+    // where it would route rather than an empty panel.
+    const ws = b?.weights ?? [];
+    const list = assets.data?.assets ?? [];
+    const groups = assetGroups(list, assets.data?.families);
+    return ws.map((w): FlowLeg => {
+      const group = groups.find((g) => g.id === w.asset);
+      const a = group?.best ?? list.find((x) => x.asset === w.asset);
+      const venueID = w.venue_id || a?.best_venue;
+      return {
+        asset: a?.asset ?? w.asset,
+        amountUsd: null,
+        venue:
+          venueID && a && a.best_apy > 0
+            ? { project: venueProject(venueID), apy: a.best_apy }
+            : null,
+        idle: false,
+        family: group?.family ? group.id : undefined,
+      };
+    });
+  }, [holdings, plan.data, b?.weights, assets.data]);
 
   const apy =
     holdings.length > 0 && held > 0
@@ -479,14 +504,6 @@ export default function BasketPage() {
                               }`
                             : "…"}
                 </Button>
-                {busy && (
-                  <p className="text-center text-xs text-muted-foreground">
-                    {mode === "deposit"
-                      ? "Approving, then supplying — one transaction per step."
-                      : "Withdrawing from each venue, one transaction per step."}{" "}
-                    Usually under a minute; keep this tab open.
-                  </p>
-                )}
                 {mode === "withdraw" && step === "ready" && held > 0 && (
                   <Button
                     variant="ghost"
