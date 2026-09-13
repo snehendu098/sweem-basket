@@ -44,53 +44,7 @@ Two design consequences follow from "no custody", and they shape everything:
 
 ## Architecture
 
-```
-                       browser
-                          |
-              Privy embedded wallet (user's)
-                          |  access token (ES256)
-                          v
-  +---------------------------------------------------------------+
-  |  client        Next.js :3000   baskets, invest, portfolio      |
-  +---------------------------------------------------------------+
-                          |
-                          v
-  +---------------------------------------------------------------+
-  |  wallet        Go :8080        auth, baskets, plan, deposit,   |
-  |                                withdraw, rebalance, portfolio  |
-  |                                the ONLY client of the executor |
-  +----+------------------+-------------------+-------------------+
-       |                  |                   |
-       | GET /venues/best | POST /route       | Postgres
-       v                  v                   v
-  +-----------+     +------------+      users, baskets, weights,
-  |market-data|     |  executor  |      subscriptions, positions,
-  |  Go :8081 |     | Rust :8082 |      executions (+ steps JSONB)
-  +-----+-----+     +-----+------+
-        |                 |
-        |                 |  signs via Privy delegated signer
-        |                 |  (P-256 authorization signature)
-        |                 v
-        |          +--------------+        +------------------+
-        |          |  Privy API   |------->| user's own wallet|
-        |          +--------------+        +--------+---------+
-        |                                           |
-        |  eth_call: Aave getReserveData,            | tx
-        |  Comet getSupplyRate, Chainlink            v
-        |                                    Aave V3 / Compound III /
-        |  GraphQL                           Morpho / Moonwell / Uniswap v3
-        v
-  +---------------------------+
-  |  sweem subgraph (ours)    |  Aave V3 + Compound III + MetaMorpho
-  |  Base + Base Sepolia      |  -> one normalized `Venue` entity
-  +---------------------------+
-        |
-        v  Redis: venue:*, apy:<chain>:<ASSET> ZSET, venues:updated pubsub
-  +-----------+
-  |  keeper   |  Go :8083   watches drift, prices gas live, decides WHEN.
-  |           |             POSTs /rebalance. Never signs anything.
-  +-----------+
-```
+![sweem architecture](./assets/architecture.png)
 
 Signing authority lives in exactly one process. The keeper can be crashed,
 restarted or duplicated without putting funds at risk, because its decision is
