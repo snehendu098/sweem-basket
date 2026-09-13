@@ -159,7 +159,13 @@ pub async fn max_withdrawable(
         VenueKind::CToken => (venue.target, [0x3a, 0xf9, 0xe6, 0x69]),
         VenueKind::Erc4626 => (venue.target, [0xce, 0x96, 0xcb, 0x77]),
         VenueKind::CompoundV3 => (venue.target, [0x70, 0xa0, 0x82, 0x31]),
-        VenueKind::AaveV3 | VenueKind::Hold => return None,
+        // Aave holds the position in an aToken, one to one with the
+        // underlying. The pool is asked which token that is.
+        VenueKind::AaveV3 => (
+            atoken(rpc, venue).await?,
+            [0x70, 0xa0, 0x82, 0x31],
+        ),
+        VenueKind::Hold => return None,
     };
 
     let mut data = Vec::with_capacity(36);
@@ -169,6 +175,19 @@ pub async fn max_withdrawable(
 
     let out = rpc.eth_call(&target.to_string(), &data).await?;
     (out.len() >= 32).then(|| U256::from_be_slice(&out[..32]))
+}
+
+/// getReserveData(asset).aTokenAddress — the ninth word of the returned struct.
+async fn atoken(rpc: &crate::rpc::Rpc, venue: &Venue) -> Option<Address> {
+    let mut data = Vec::with_capacity(36);
+    data.extend_from_slice(&[0x35, 0xea, 0x6a, 0x75]);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(venue.asset.as_slice());
+
+    let out = rpc.eth_call(&venue.target.to_string(), &data).await?;
+    let word = out.get(8 * 32..9 * 32)?;
+    let addr = Address::from_slice(&word[12..]);
+    (!addr.is_zero()).then_some(addr)
 }
 
 pub fn approve(token: Address, spender: Address, amount: U256) -> Call {
@@ -230,6 +249,25 @@ mod withdrawable_tests {
         assert_eq!(&hex::decode("3af9e669").unwrap()[..], [0x3a, 0xf9, 0xe6, 0x69]);
         assert_eq!(&hex::decode("ce96cb77").unwrap()[..], [0xce, 0x96, 0xcb, 0x77]);
         assert_eq!(&hex::decode("70a08231").unwrap()[..], [0x70, 0xa0, 0x82, 0x31]);
+        // getReserveData(address), for the aToken lookup
+        assert_eq!(&hex::decode("35ea6a75").unwrap()[..], [0x35, 0xea, 0x6a, 0x75]);
+    }
+
+    /// Only Hold has no balance to read. Every venue kind that holds a
+    /// position must expose one, or a withdrawal sized in USD can overdraw it.
+    #[test]
+    fn only_hold_has_no_readable_balance() {
+        for kind in [
+            VenueKind::CToken,
+            VenueKind::Erc4626,
+            VenueKind::CompoundV3,
+            VenueKind::AaveV3,
+        ] {
+            assert!(
+                !matches!(kind, VenueKind::Hold),
+                "{kind:?} must have a balance source"
+            );
+        }
     }
 }
 
