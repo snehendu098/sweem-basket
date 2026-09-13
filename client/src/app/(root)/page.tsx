@@ -555,8 +555,8 @@ export default function Create() {
             <div className="p-5 pt-0">
               <Button
                 className="w-full py-3"
+                pending={busy}
                 disabled={
-                  busy ||
                   step === "loading" ||
                   step === "syncing" ||
                   (step === "ready" && !canSubmit)
@@ -581,6 +581,14 @@ export default function Create() {
                                 ? `Retry deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`
                                 : `Create & deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`}
               </Button>
+
+              {busy && (
+                <p className="mt-3 text-center text-xs text-muted-foreground">
+                  {phase === "creating"
+                    ? "Saving the basket…"
+                    : `Each leg is approved, then supplied, one transaction at a time. ${chosen.length > 1 ? `${chosen.length} legs, so this ` : "This "}usually takes under a minute — keep this tab open.`}
+                </p>
+              )}
             </div>
           </Panel>
 

@@ -76,9 +76,11 @@ export function Button({
   children,
   variant = "primary",
   className = "",
+  pending = false,
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost";
+  pending?: boolean;
 }) {
   const styles = {
     primary:
@@ -94,7 +96,12 @@ export function Button({
         styles,
         className,
       )}
+      disabled={rest.disabled || pending}
+      aria-busy={pending || undefined}
     >
+      {pending && (
+        <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+      )}
       {children}
     </button>
   );

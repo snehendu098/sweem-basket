@@ -207,7 +207,7 @@ export default function BasketPage() {
             {b && authenticated && (
               <Button
                 variant="ghost"
-                disabled={subBusy}
+                pending={subBusy}
                 onClick={() => void toggleSubscription()}
               >
                 {subBusy ? "Working…" : b.subscribed ? "Exit basket" : "Subscribe"}
@@ -455,8 +455,8 @@ export default function BasketPage() {
               <div className="space-y-3 p-5">
                 <Button
                   className="w-full py-3"
+                  pending={busy}
                   disabled={
-                    busy ||
                     step === "loading" ||
                     step === "syncing" ||
                     (step === "ready" && (!amountValid || !b))
@@ -464,7 +464,9 @@ export default function BasketPage() {
                   onClick={() => void (step === "ready" ? settle() : gate())}
                 >
                   {busy
-                    ? "Executing…"
+                    ? mode === "deposit"
+                      ? "Depositing…"
+                      : "Withdrawing…"
                     : step === "connect"
                       ? "Connect"
                       : step === "wallet"
@@ -477,6 +479,14 @@ export default function BasketPage() {
                               }`
                             : "…"}
                 </Button>
+                {busy && (
+                  <p className="text-center text-xs text-muted-foreground">
+                    {mode === "deposit"
+                      ? "Approving, then supplying — one transaction per step."
+                      : "Withdrawing from each venue, one transaction per step."}{" "}
+                    Usually under a minute; keep this tab open.
+                  </p>
+                )}
                 {mode === "withdraw" && step === "ready" && held > 0 && (
                   <Button
                     variant="ghost"
