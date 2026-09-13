@@ -44,7 +44,9 @@ import { Faq } from "@/components/Faq";
 import { TokenPicker, type PickOption } from "@/components/TokenPicker";
 import {
   SettleDetail,
+  dismissToast,
   toastError,
+  toastLoading,
   useSettleToast,
 } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
@@ -319,6 +321,10 @@ export default function Create() {
     setPhase("funding");
     clear();
     setFundFailed(false);
+    const settling = toastLoading(
+      `Depositing ${fmtUsd(parsed)}…`,
+      "approving, swapping and supplying — one transaction per step",
+    );
     try {
       const res = await api<SettleResult>(`/v1/baskets/${id}/deposit`, {
         method: "POST",
@@ -327,6 +333,7 @@ export default function Create() {
       const filled = (res.data.legs ?? []).some(
         (l) => l.status === "submitted" || l.status === "pending",
       );
+      dismissToast(settling);
       notify(res.status, res.data, { key: id, verb: "Deposited" });
       portfolio.reload();
       if (!filled) {
@@ -338,6 +345,7 @@ export default function Create() {
       setPhase("funded");
       if (res.status !== 207) router.push(`/baskets/${id}`);
     } catch (e) {
+      dismissToast(settling);
       toastError(e);
       await discard(id);
       setFundFailed(true);

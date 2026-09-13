@@ -31,7 +31,13 @@ import {
   Skeleton,
   Spinner,
 } from "@/components/ui";
-import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
+import {
+  SettleDetail,
+  dismissToast,
+  toastError,
+  toastLoading,
+  useSettleToast,
+} from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { CountUp, Reveal, Segmented } from "@/components/motion";
 import { BasketFlow } from "@/components/basket/BasketFlow";
@@ -175,17 +181,25 @@ export default function BasketPage() {
   async function settle(all = false) {
     setBusy(true);
     clear();
+    const settling = toastLoading(
+      mode === "deposit"
+        ? `Depositing ${amountValid ? fmtUsd(parsed) : ""}…`
+        : `Withdrawing ${all ? "everything" : fmtUsd(parsed)}…`,
+      "one transaction per step, then the swap back to " + QUOTE_ASSET,
+    );
     try {
       const res = await api<SettleResult>(`/v1/baskets/${id}/${mode}`, {
         method: "POST",
         body: JSON.stringify(all ? { all: true } : { amount_usd: parsed }),
       });
+      dismissToast(settling);
       const clean = notify(res.status, res.data, {
         key: id,
         verb: mode === "deposit" ? "Deposited" : "Withdrew",
       });
       if (clean) setAmount("");
     } catch (e) {
+      dismissToast(settling);
       toastError(e);
     } finally {
       setBusy(false);
