@@ -12,6 +12,7 @@ import {
   fmtPct,
   fmtTime,
   fmtUsd,
+  holdingVenue,
   planFlowLegs,
   publicBasket,
 } from "@/lib/api";
@@ -23,6 +24,7 @@ import {
   ErrorBox,
   Label,
   Panel,
+  PositionReturn,
   Spinner,
 } from "@/components/ui";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
@@ -229,9 +231,38 @@ export default function BasketPage() {
               />
             </Panel>
 
+            {holdings.length > 0 && (
+              <Panel>
+                <div className="flex items-center justify-between px-5 py-5">
+                  <Label>Per asset</Label>
+                  <span className="text-xs text-muted-foreground">
+                    yield · price since entry
+                  </span>
+                </div>
+                <ul className="divide-y divide-border border-t border-border">
+                  {holdings.map((h) => (
+                    <li
+                      key={h.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-4"
+                    >
+                      <span className="inline-flex items-center gap-2 font-medium">
+                        <TokenIcon symbol={h.asset} size={20} />
+                        {displayAsset(h.asset)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {holdingVenue(h)}
+                      </span>
+                      <span className="tnum ml-auto">{fmtUsd(h.amount_usd)}</span>
+                      <PositionReturn h={h} />
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-3">
               <Stat
-                label="APY"
+                label="Yield APY"
                 tone="good"
                 value={apy === null ? "—" : <CountUp value={apy} format={fmtPct} />}
                 note={

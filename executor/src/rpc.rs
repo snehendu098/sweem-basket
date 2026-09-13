@@ -12,6 +12,7 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Receipt {
     pub outcome: Outcome,
+    pub block: u64,
     pub logs: Vec<(String, String)>,
 }
 
@@ -49,6 +50,11 @@ impl Rpc {
         let v = self.post(body).await?;
         let result = v.get("result")?;
         let status = result.get("status")?.as_str()?;
+        let block = result
+            .get("blockNumber")
+            .and_then(|b| b.as_str())
+            .and_then(|b| u64::from_str_radix(b.trim_start_matches("0x"), 16).ok())
+            .unwrap_or(0);
         let logs = result
             .get("logs")
             .and_then(|l| l.as_array())
@@ -64,6 +70,7 @@ impl Rpc {
             })
             .unwrap_or_default();
         Some(Receipt {
+            block,
             outcome: if status == "0x1" {
                 Outcome::Confirmed
             } else {
@@ -71,6 +78,13 @@ impl Rpc {
             },
             logs,
         })
+    }
+
+    pub async fn block_number(&self) -> Option<u64> {
+        let v = self
+            .post(json!({"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []}))
+            .await?;
+        u64::from_str_radix(v.get("result")?.as_str()?.trim_start_matches("0x"), 16).ok()
     }
 
     pub async fn eth_call(&self, to: &str, data: &[u8]) -> Option<Vec<u8>> {
@@ -147,6 +161,7 @@ mod tests {
     #[test]
     fn emitted_matches_address_and_topic_case_insensitively() {
         let r = Receipt {
+            block: 1,
             outcome: Outcome::Confirmed,
             logs: vec![("0xAAaa".to_lowercase(), "0xBBbb".to_lowercase())],
         };

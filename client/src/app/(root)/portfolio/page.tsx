@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   displayAsset,
-  displayProject,
   fmtPct,
   fmtTime,
   fmtUsd,
+  holdingVenue,
   sameChain,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
@@ -17,6 +17,7 @@ import {
   Divider,
   ErrorBox,
   Panel,
+  PositionReturn,
   Spinner,
 } from "@/components/ui";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
@@ -233,23 +234,14 @@ function Row({ h }: { h: Holding }) {
           <TokenIcon symbol={h.asset} size={20} />
           {displayAsset(h.asset)}
         </span>
-        <span className="text-xs text-muted-foreground">
-          {idle
-            ? "idle in wallet"
-            : held
-              ? "held in wallet · no yield venue"
-              : displayProject(h.project)}
-        </span>
+        <span className="text-xs text-muted-foreground">{holdingVenue(h)}</span>
         <span className="tnum ml-auto">{fmtUsd(h.amount_usd)}</span>
-        <span
-          className={`tnum w-16 text-right text-sm ${held ? "text-muted-foreground" : "text-positive"}`}
-        >
-          {idle || held ? "—" : fmtPct(h.current_apy)}
-        </span>
+        <PositionReturn h={h} />
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>entry {fmtPct(h.entry_apy)}</span>
+        <span>yield entry {fmtPct(h.entry_apy)}</span>
+        {h.price_usd !== undefined && <span className="tnum">price {fmtUsd(h.price_usd)}</span>}
         <span
           className="tnum"
           title={

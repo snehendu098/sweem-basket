@@ -40,16 +40,18 @@ type Basket struct {
 // Asset is always a concrete instrument: a family picks one at deposit and the
 // keeper then only ever moves it between venues OF that instrument.
 type Position struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	BasketID  string    `json:"basket_id"`
-	Asset     string    `json:"asset"`
-	VenueID   string    `json:"venue_id"`
-	Chain     string    `json:"chain"`
-	Project   string    `json:"project"`
-	AmountUSD float64   `json:"amount_usd"`
-	EntryAPY  float64   `json:"entry_apy"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	BasketID  string  `json:"basket_id"`
+	Asset     string  `json:"asset"`
+	VenueID   string  `json:"venue_id"`
+	Chain     string  `json:"chain"`
+	Project   string  `json:"project"`
+	AmountUSD float64 `json:"amount_usd"`
+	EntryAPY  float64 `json:"entry_apy"`
+	// 0 when unknown: a price we never recorded is not a price of zero.
+	EntryPriceUSD float64   `json:"entry_price_usd"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Execution struct {

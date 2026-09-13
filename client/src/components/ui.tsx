@@ -6,12 +6,22 @@ import {
   basescanTx,
   displayAsset,
   displayProject,
+  fmtPct,
+  fmtPctSigned,
   fmtUsd,
   shortHash,
 } from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
 import { cn } from "@/lib/utils";
-import type { LegResult, LegStatus, SettleResult, Step } from "@/lib/types";
+import {
+  HOLD_VENUE_ID,
+  IDLE_VENUE_ID,
+  type Holding,
+  type LegResult,
+  type LegStatus,
+  type SettleResult,
+  type Step,
+} from "@/lib/types";
 
 export function useDismissable() {
   const [open, setOpen] = useState(false);
@@ -97,6 +107,63 @@ export function Panel({
     >
       {children}
     </div>
+  );
+}
+
+export function PriceMove({
+  pct,
+  reason,
+}: {
+  pct?: number;
+  reason?: string;
+}) {
+  if (pct === undefined) {
+    return (
+      <span className="w-24 truncate text-right text-xs text-muted-foreground">
+        <Tooltip label={reason || "no entry price recorded"}>
+          <span className="truncate">no price</span>
+        </Tooltip>
+      </span>
+    );
+  }
+  return (
+    <span
+      title="price move since entry"
+      className={cn(
+        "tnum w-24 text-right text-sm",
+        pct > 0
+          ? "text-positive"
+          : pct < 0
+            ? "text-destructive"
+            : "text-muted-foreground",
+      )}
+    >
+      {fmtPctSigned(pct)}
+    </span>
+  );
+}
+
+// Yield and price are separate components of the return and never summed.
+export function PositionReturn({
+  h,
+}: {
+  h: Pick<Holding, "venue_id" | "current_apy" | "price_return_pct" | "price_reason">;
+}) {
+  const idle = h.venue_id === IDLE_VENUE_ID;
+  const held = h.venue_id === HOLD_VENUE_ID;
+  return (
+    <>
+      <span
+        title="yield, paid in the asset"
+        className={cn(
+          "tnum w-16 text-right text-sm",
+          held ? "text-muted-foreground" : "text-positive",
+        )}
+      >
+        {idle || held ? "—" : fmtPct(h.current_apy)}
+      </span>
+      <PriceMove pct={h.price_return_pct} reason={h.price_reason} />
+    </>
   );
 }
 

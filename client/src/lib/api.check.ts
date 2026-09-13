@@ -27,8 +27,10 @@ import {
   evenSplit,
   readBalances,
   setActiveChainId,
+  fmtPctSigned,
   fmtUsd,
   fmtUsdOrUnknown,
+  holdingVenue,
   marketAssets,
   planFlowLegs,
   publicBaskets,
@@ -36,7 +38,7 @@ import {
   walletFetch,
   weightsFor,
 } from "./api";
-import { ownership } from "./types";
+import { HOLD_VENUE_ID, IDLE_VENUE_ID, ownership } from "./types";
 import type { AssetSummary, BasketSummary, Family, PlanLeg, Venue } from "./types";
 
 type Stub = { status: number; body: unknown };
@@ -437,6 +439,26 @@ async function main() {
     { kept: ["BTC"], dropped: ["v9"] },
   );
   assert.deepEqual(remapSelection([], () => null), { kept: [], dropped: [] });
+
+  assert.equal(fmtPctSigned(4.2), "+4.20%");
+  assert.equal(fmtPctSigned(-4.2), "-4.20%");
+  assert.equal(fmtPctSigned(0), "0.00%");
+  // A rounding-to-zero move is zero, not a negative one.
+  assert.equal(fmtPctSigned(-0.001), "0.00%");
+  assert.equal(fmtPctSigned(0.001), "0.00%");
+
+  assert.equal(
+    holdingVenue({ venue_id: "base:aave-v3:0x1", project: "aave-v3" }),
+    "Aave v3",
+  );
+  assert.equal(
+    holdingVenue({ venue_id: IDLE_VENUE_ID, project: "" }),
+    "idle in wallet",
+  );
+  assert.equal(
+    holdingVenue({ venue_id: HOLD_VENUE_ID, project: "" }),
+    "held in wallet · no yield venue",
+  );
 
   assert.equal(sameChain("base", "base"), true);
   assert.equal(sameChain("Base", "base"), true);

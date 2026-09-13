@@ -362,15 +362,20 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 		}
 		submittedUSD += leg.AmountUSD
 
+		entryPrice := float64(0)
+		if leg.PriceUSD != nil {
+			entryPrice = *leg.PriceUSD
+		}
 		if err := s.Store.UpsertPosition(r.Context(), store.Position{
-			UserID:    u.ID,
-			BasketID:  b.ID,
-			Asset:     leg.Asset,
-			VenueID:   venueID,
-			Chain:     chain,
-			Project:   project,
-			AmountUSD: leg.AmountUSD,
-			EntryAPY:  apy,
+			UserID:        u.ID,
+			BasketID:      b.ID,
+			Asset:         leg.Asset,
+			VenueID:       venueID,
+			Chain:         chain,
+			Project:       project,
+			AmountUSD:     leg.AmountUSD,
+			EntryAPY:      apy,
+			EntryPriceUSD: entryPrice,
 		}); err != nil {
 			s.Log.Error("upsert position", "asset", leg.Asset, "err", err)
 			res.Reason = "submitted, but the position record failed to save"

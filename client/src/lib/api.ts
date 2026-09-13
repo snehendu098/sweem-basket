@@ -1,4 +1,6 @@
 import {
+  HOLD_VENUE_ID,
+  IDLE_VENUE_ID,
   TOTAL_BPS,
   type AssetSummary,
   type BasketSummary,
@@ -398,6 +400,12 @@ export const fmtPct = (n: number, digits = 2) => `${n.toFixed(digits)}%`;
 export const fmtPctOrDash = (n: number | null | undefined, digits = 2) =>
   n === null || n === undefined ? "—" : fmtPct(n, digits);
 
+// -0.001 must not print as "-0.00%": round before deciding the sign.
+export const fmtPctSigned = (n: number, digits = 2) => {
+  const r = Number(n.toFixed(digits));
+  return `${r > 0 ? "+" : ""}${r.toFixed(digits)}%`;
+};
+
 export const fmtBps = (bps: number) => `${(bps / 100).toFixed(2)}%`;
 
 export const shortHash = (h: string) =>
@@ -500,6 +508,13 @@ export const venueProject = (id: string) => id.split(":")[1] ?? id;
 
 export const displayProject = (project: string) =>
   DISPLAY_PROJECT[project] ?? project;
+
+export const holdingVenue = (h: { venue_id: string; project: string }): string =>
+  h.venue_id === IDLE_VENUE_ID
+    ? "idle in wallet"
+    : h.venue_id === HOLD_VENUE_ID
+      ? "held in wallet · no yield venue"
+      : displayProject(h.project);
 
 // Largest-remainder, mirroring allocate() in services/wallet/internal/api/deposit.go.
 // Three assets is 3334/3333/3333 — 3333×3 sums to 9999, which the backend rejects.

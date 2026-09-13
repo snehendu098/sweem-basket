@@ -240,14 +240,28 @@ pub async fn route(
             break;
         }
 
-        match rpc::wait(
-            || rpc.receipt(&hash),
-            state.receipt_timeout,
-            POLL_INTERVAL,
-        )
-        .await
-        .map(|receipt| classify(&receipt, call))
-        {
+        let settled = rpc::wait(|| rpc.receipt(&hash), state.receipt_timeout, POLL_INTERVAL).await;
+
+        // A Base flashblock receipt arrives ~200ms before its block is
+        // canonical. The next step is simulated by Privy against canonical
+        // state, so submitting on the preconfirmation alone reverts on a
+        // balance the chain does not show yet.
+        if let Some(r) = settled.as_ref() {
+            if r.outcome == Outcome::Confirmed && r.block > 0 {
+                rpc::wait(
+                    || async {
+                        rpc.block_number()
+                            .await
+                            .filter(|latest| *latest >= r.block)
+                    },
+                    state.receipt_timeout,
+                    POLL_INTERVAL,
+                )
+                .await;
+            }
+        }
+
+        match settled.map(|receipt| classify(&receipt, call)) {
             Some(StepOutcome::Confirmed) => steps.push(StepResult {
                 step: i,
                 tx_hash: hash,
@@ -956,6 +970,7 @@ mod tests {
         let call = deposit_call(&venue, alloy_primitives::U256::from(1u64), Address::repeat_byte(0x33)).unwrap();
 
         let silent_failure = rpc::Receipt {
+            block: 1,
             outcome: Outcome::Confirmed,
             logs: vec![],
         };
@@ -965,6 +980,7 @@ mod tests {
         }
 
         let real_success = rpc::Receipt {
+            block: 1,
             outcome: Outcome::Confirmed,
             logs: vec![(venue.target.to_string().to_lowercase(), TOPIC_MINT.into())],
         };

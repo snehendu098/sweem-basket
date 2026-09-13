@@ -303,17 +303,22 @@ func (s *Store) Unsubscribe(ctx context.Context, userID, basketID string) error 
 
 func (s *Store) UpsertPosition(ctx context.Context, p Position) error {
 	const q = `
-		INSERT INTO positions (user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+		INSERT INTO positions (user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, entry_price_usd, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
 		ON CONFLICT (user_id, basket_id, asset) DO UPDATE SET
 			venue_id = EXCLUDED.venue_id,
 			chain = EXCLUDED.chain,
 			project = EXCLUDED.project,
 			amount_usd = EXCLUDED.amount_usd,
 			entry_apy = EXCLUDED.entry_apy,
+			entry_price_usd = CASE
+				WHEN EXCLUDED.entry_price_usd > 0 THEN EXCLUDED.entry_price_usd
+				ELSE positions.entry_price_usd
+			END,
 			updated_at = now()`
 	_, err := s.pool.Exec(ctx, q,
-		p.UserID, p.BasketID, p.Asset, p.VenueID, p.Chain, p.Project, p.AmountUSD, p.EntryAPY)
+		p.UserID, p.BasketID, p.Asset, p.VenueID, p.Chain, p.Project, p.AmountUSD, p.EntryAPY,
+		p.EntryPriceUSD)
 	return err
 }
 
@@ -323,7 +328,8 @@ func (s *Store) DeletePosition(ctx context.Context, id string) error {
 }
 
 func (s *Store) Positions(ctx context.Context, userID, basketID string) ([]Position, error) {
-	q := `SELECT id, user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy, updated_at
+	q := `SELECT id, user_id, basket_id, asset, venue_id, chain, project, amount_usd, entry_apy,
+	             entry_price_usd, updated_at
 	      FROM positions WHERE user_id = $1`
 	args := []any{userID}
 	if basketID != "" {
@@ -341,7 +347,8 @@ func (s *Store) Positions(ctx context.Context, userID, basketID string) ([]Posit
 	for rows.Next() {
 		var p Position
 		if err := rows.Scan(&p.ID, &p.UserID, &p.BasketID, &p.Asset, &p.VenueID,
-			&p.Chain, &p.Project, &p.AmountUSD, &p.EntryAPY, &p.UpdatedAt); err != nil {
+			&p.Chain, &p.Project, &p.AmountUSD, &p.EntryAPY, &p.EntryPriceUSD,
+			&p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

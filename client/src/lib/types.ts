@@ -135,6 +135,9 @@ export type Holding = Position & {
   onchain_usd: number | null;
   reconciled: boolean;
   value_reason?: string;
+  price_usd?: number;
+  price_return_pct?: number;
+  price_reason?: string;
 };
 
 export type OnchainBalance = {

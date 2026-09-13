@@ -295,6 +295,12 @@ type Holding struct {
 	Reconciled  bool              `json:"reconciled"`
 	ValueReason string            `json:"value_reason,omitempty"`
 	RouteNote   string            `json:"route_note,omitempty"`
+
+	// The venue rate is denominated in the asset; holding the asset is a
+	// separate bet. Both are reported, never summed into one "APY".
+	PriceUSD    *float64 `json:"price_usd,omitempty"`
+	PriceReturn *float64 `json:"price_return_pct,omitempty"`
+	PriceReason string   `json:"price_reason,omitempty"`
 }
 
 func driftAPY(p store.Position, best marketdata.Venue) (current, drift float64) {
@@ -333,6 +339,18 @@ func (s *Server) portfolio(w http.ResponseWriter, r *http.Request) {
 		}
 		if onchainErr == nil {
 			h.OnchainUSD, h.Reconciled, h.ValueReason = s.reconcile(r.Context(), p, balances)
+		}
+		if price, perr := s.priceUSD(r.Context(), p.Chain, p.Asset); perr != nil {
+			h.PriceReason = priceReason(p.Asset, perr)
+		} else {
+			now := price.USD
+			h.PriceUSD = &now
+			if p.EntryPriceUSD > 0 && now > 0 {
+				move := (now/p.EntryPriceUSD - 1) * 100
+				h.PriceReturn = &move
+			} else {
+				h.PriceReason = "entry price was not recorded, so the price move is unknown"
+			}
 		}
 		totalUSD += p.AmountUSD
 		weightedAPY += h.CurrentAPY * p.AmountUSD
