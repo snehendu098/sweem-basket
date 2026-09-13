@@ -54,10 +54,12 @@ variable "market_domain" {
   description = "Hostname for the market-data API."
 }
 
+# Comma separated. localhost is here so the local dev server can run against
+# the deployed APIs; drop it if these ever hold anything worth protecting.
 variable "ui_origin" {
   type        = string
-  default     = "https://basket.sweem.org"
-  description = "Browser origin allowed by CORS on both APIs."
+  default     = "https://basket.sweem.org,http://localhost:3000"
+  description = "Browser origins allowed by CORS on both APIs."
 }
 
 variable "acme_email" {
