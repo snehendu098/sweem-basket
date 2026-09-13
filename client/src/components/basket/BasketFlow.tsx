@@ -3,25 +3,22 @@
 import { useMemo } from "react";
 import {
   Background,
+  BaseEdge,
+  EdgeLabelRenderer,
   Handle,
   Position,
   ReactFlow,
+  getStraightPath,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { CircleDashed, Wallet } from "lucide-react";
-import { displayAsset, displayProject, fmtPct, fmtUsd } from "@/lib/api";
+import { displayProject, fmtPct, fmtUsd, legLabel } from "@/lib/api";
 import { TokenIcon } from "@/components/TokenIcon";
-
-export type FlowLeg = {
-  asset: string;
-  amountUsd: number | null;
-  venue: { project: string; apy: number } | null;
-  idle: boolean;
-  reason?: string;
-};
+import type { FlowLeg } from "@/lib/types";
 
 const PROTOCOL_MARK: Record<string, string> = {
   "aave-v3": "aave-v3.png",
@@ -79,7 +76,10 @@ function Mark({ data }: { data: CardData }) {
 function Card({ data }: NodeProps<CardNode>) {
   const second = data.value ?? data.note;
   return (
-    <div className={`${BASE} ${TONE[data.tone as string] ?? "border-border bg-card"}`}>
+    <div
+      title={data.note}
+      className={`${BASE} ${TONE[data.tone as string] ?? "border-border bg-card"}`}
+    >
       {data.ends !== "left" && (
         <Handle type="target" position={Position.Left} className="!opacity-0" />
       )}
@@ -109,7 +109,39 @@ function Card({ data }: NodeProps<CardNode>) {
   );
 }
 
+function SwapEdge({ id, sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
+  const [path, labelX, labelY] = getStraightPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+          }}
+          className="pointer-events-none absolute grid size-6 place-items-center rounded-full bg-card"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/protocols/uniswap.png"
+            alt="swapped on Uniswap"
+            width={18}
+            height={18}
+            className="size-[18px] rounded-full"
+          />
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
 const nodeTypes = { card: Card };
+const edgeTypes = { swap: SwapEdge };
 
 // Uniform height: unequal heights bow same-row edges.
 const ROW = 88;
@@ -122,9 +154,11 @@ const defaultEdgeOptions = { type: "straight" } as const;
 export function BasketFlow({
   legs,
   emptyLabel,
+  swapMark,
 }: {
   legs: FlowLeg[];
   emptyLabel: string;
+  swapMark?: boolean;
 }) {
   const { nodes, edges } = useMemo(() => {
     const nodes: CardNode[] = [];
@@ -149,7 +183,7 @@ export function BasketFlow({
         type: "card",
         position: { x: COL.asset, y },
         data: {
-          title: displayAsset(l.asset),
+          title: legLabel(l),
           ...(l.amountUsd === null
             ? { note: "value unknown" }
             : { value: fmtUsd(l.amountUsd) }),
@@ -158,7 +192,12 @@ export function BasketFlow({
         style: { width: WIDTH.asset, height: HEIGHT },
         draggable: false,
       });
-      edges.push({ id: `e-basket-${asset}`, source: "basket", target: asset });
+      edges.push({
+        id: `e-basket-${asset}`,
+        source: "basket",
+        target: asset,
+        ...(swapMark ? { type: "swap" } : {}),
+      });
 
       if (l.idle) {
         const idle = `idle:${l.asset}`;
@@ -176,6 +215,26 @@ export function BasketFlow({
           draggable: false,
         });
         edges.push({ id: `e-${asset}-${idle}`, source: asset, target: idle });
+        return;
+      }
+
+      if (l.hold) {
+        const held = `hold:${l.asset}`;
+        nodes.push({
+          id: held,
+          type: "card",
+          position: { x: COL.venue, y },
+          data: {
+            title: "Your wallet",
+            value: fmtPct(0),
+            note: l.reason,
+            wallet: true,
+            ends: "right",
+          },
+          style: { width: WIDTH.venue, height: HEIGHT },
+          draggable: false,
+        });
+        edges.push({ id: `e-${asset}-${held}`, source: asset, target: held });
         return;
       }
 
@@ -215,7 +274,7 @@ export function BasketFlow({
     });
 
     return { nodes, edges };
-  }, [legs]);
+  }, [legs, swapMark]);
 
   if (legs.length === 0) {
     return (
@@ -234,6 +293,7 @@ export function BasketFlow({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
         fitViewOptions={{ padding: 0.14 }}

@@ -174,6 +174,14 @@ func TestPartitionWithdrawable(t *testing.T) {
 			wantWithdraw: 1, wantSkipped: 1, wantAvailable: 600,
 		},
 		{
+			name: "a held position is withdrawable: the exit is a swap, not a venue call",
+			positions: []store.Position{
+				{Asset: "USDC", VenueID: "Base:aave-v3:0xbb", AmountUSD: 600},
+				{Asset: "DAI", VenueID: HoldVenueID, AmountUSD: 400},
+			},
+			wantWithdraw: 2, wantAvailable: 1000,
+		},
+		{
 			name: "everything idle leaves nothing to withdraw",
 			positions: []store.Position{
 				{Asset: "USDC", VenueID: IdleVenueID, AmountUSD: 600},

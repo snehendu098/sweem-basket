@@ -109,6 +109,37 @@ func (s *Server) pinnedRoutable(ctx context.Context, venueID, asset, chain strin
 	return marketdata.Venue{}, fmt.Errorf("%w: pinned venue %s is not published for %s on %s", ErrPinUnusable, venueID, asset, chain)
 }
 
+var ErrNoFamilyInstrument = errors.New("no routable instrument in family")
+
+// The family names the exposure; the instrument is chosen here, at deposit, so
+// each depositor gets the best one as of their own deposit rather than the
+// creator's snapshot from whenever the basket was published.
+func (s *Server) resolveFamily(ctx context.Context, family, chain string) (string, error) {
+	assets, err := s.Market.Assets(ctx, chain)
+	if err != nil {
+		return "", fmt.Errorf("market data unavailable: %w", err)
+	}
+	for _, a := range assets {
+		if !strings.EqualFold(a.Family, family) || a.Routable == 0 {
+			continue
+		}
+		if err := s.swapFundable(ctx, a.Asset, chain); err != nil {
+			if errors.Is(err, ErrNoSwapPath) {
+				continue
+			}
+			return "", err
+		}
+		switch _, _, err := s.bestRoutable(ctx, a.Asset, chain); {
+		case errors.Is(err, marketdata.ErrNoVenue), errors.Is(err, ErrNoRoutableVenue):
+			continue
+		case err != nil:
+			return "", err
+		}
+		return a.Asset, nil
+	}
+	return "", fmt.Errorf("%w: %s on %s", ErrNoFamilyInstrument, family, chain)
+}
+
 var ErrPinUnusable = errors.New("pinned venue unusable")
 
 const QuoteAsset = "USDC"

@@ -196,6 +196,9 @@ type AssetSummary struct {
 	BestVenue        string  `json:"best_venue"`
 	TotalTVLUsd      float64 `json:"total_tvl_usd"`
 	Routable         int     `json:"routable_venues"`
+	// Of the best venue, not the asset: what the picker would actually route into.
+	BestLiquidityUsd   float64 `json:"best_liquidity_usd"`
+	BestLiquidityKnown bool    `json:"best_liquidity_known"`
 }
 
 type FamilySummary struct {
@@ -235,6 +238,7 @@ func (s *Store) Assets(ctx context.Context, chain string) ([]AssetSummary, error
 		if v.APY > a.BestAPY {
 			a.BestAPY, a.BestVenue = v.APY, v.ID
 			a.BestAPYBase, a.BestAPYReward, a.BestAPYIntrinsic = v.APYBase, v.APYReward, v.APYIntrinsic
+			a.BestLiquidityUsd, a.BestLiquidityKnown = v.LiquidityUsd, v.LiquidityKnown
 		}
 	}
 	for _, label := range chainLabels(chain) {

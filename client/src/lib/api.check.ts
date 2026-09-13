@@ -11,7 +11,11 @@ import {
   reachableAssets,
   reachableVenues,
   remapSelection,
+  THIN_LIQUIDITY_USD,
+  UNKNOWN_LIQUIDITY_WARNING,
+  liquidityWarning,
   venueWarning,
+  venueProject,
   EMISSIONS_WARNING,
   NO_YIELD_WARNING,
   UNKNOWN_YIELD_WARNING,
@@ -26,11 +30,14 @@ import {
   fmtUsd,
   fmtUsdOrUnknown,
   marketAssets,
+  planFlowLegs,
   publicBaskets,
+  legLabel,
   walletFetch,
+  weightsFor,
 } from "./api";
 import { ownership } from "./types";
-import type { AssetSummary, BasketSummary, Family, Venue } from "./types";
+import type { AssetSummary, BasketSummary, Family, PlanLeg, Venue } from "./types";
 
 type Stub = { status: number; body: unknown };
 const realFetch = globalThis.fetch;
@@ -40,6 +47,9 @@ function stub(s: Stub) {
 }
 
 async function main() {
+  assert.equal(venueProject("base:compound-v3:0xabc"), "compound-v3");
+  assert.equal(venueProject("weird"), "weird");
+
   stub({
     status: 207,
     body: { failed_legs: 1, pending_legs: 1, legs: [{ status: "failed" }] },
@@ -129,6 +139,63 @@ async function main() {
     [34, 33, 33],
   );
 
+  // A family weight carries the family name: the backend picks the instrument at deposit.
+  const choices = [
+    { id: "ETH", asset: "wstETH", family: true },
+    { id: "base:aave-v3:usdc", asset: "USDC", venueId: "base:aave-v3:usdc" },
+  ];
+  assert.deepEqual(weightsFor(choices), [
+    { asset: "ETH", weight_bps: 5000 },
+    { asset: "USDC", weight_bps: 5000, venue_id: "base:aave-v3:usdc" },
+  ]);
+  // A family and a venue pin together is rejected by the backend.
+  assert.deepEqual(
+    weightsFor([{ id: "BTC", asset: "cbBTC", family: true, venueId: "v1" }]),
+    [{ asset: "BTC", weight_bps: 10000 }],
+  );
+  assert.deepEqual(
+    weightsFor(choices, 100).map((w) => w.weight_bps),
+    [50, 50],
+  );
+  // A family weight blends at its best instrument's rate; unknown stays unknown.
+  const famRates = [
+    { asset: "wstETH", best_apy: 3, family: "ETH" },
+    { asset: "cbETH", best_apy: 2, family: "ETH" },
+    { asset: "USDC", best_apy: 5, family: "USD" },
+  ];
+  assert.equal(
+    blendApy(
+      [
+        { asset: "ETH", weight_bps: 5000 },
+        { asset: "USDC", weight_bps: 5000 },
+      ],
+      famRates,
+    ),
+    4,
+  );
+  assert.equal(blendApy([{ asset: "BTC", weight_bps: 10000 }], famRates), null);
+
+  const leg = (x: Partial<PlanLeg>) =>
+    ({ weight_bps: 5000, amount_usd: 100, price_usd: 1, amount_token: 100, reason: "", ...x }) as PlanLeg;
+  const flow = planFlowLegs([
+    leg({ asset: "wstETH", family: "ETH", venue: { project: "aave-v3", apy: 3 } as Venue }),
+    leg({ asset: "DAI", hold: true, reason: "bought and held in your wallet, earning nothing" }),
+  ]);
+  assert.equal(flow.length, 2);
+  assert.equal(flow[0].family, "ETH");
+  assert.equal(flow[0].venue?.apy, 3);
+  // A hold leg is routed, not skipped: no venue, but it survives with its reason.
+  assert.equal(flow[1].hold, true);
+  assert.equal(flow[1].venue, null);
+  assert.equal(flow[1].idle, false);
+  assert.ok(flow[1].reason?.includes("earning nothing"));
+  assert.equal(planFlowLegs(null).length, 0);
+
+  assert.equal(legLabel({ asset: "wstETH", family: "ETH" }), "ETH → wstETH");
+  assert.equal(legLabel({ asset: "USDC" }), "USDC");
+  // WETH already displays as ETH: an arrow to itself is noise.
+  assert.equal(legLabel({ asset: "WETH", family: "ETH" }), "ETH");
+
   assert.equal(displayAsset("WETH"), "ETH");
   assert.equal(displayAsset("USDC"), "USDC");
   assert.equal(evenSplit(["WETH"])[0].asset, "WETH");
@@ -211,7 +278,8 @@ async function main() {
     "created · joined",
   );
 
-  const venue = (x: Partial<Venue>) => ({ apy_reward: 0, ...x }) as Venue;
+  const venue = (x: Partial<Venue>) =>
+    ({ apy_reward: 0, liquidity_known: true, liquidity_usd: 1e9, ...x }) as Venue;
   const vmap = venuesById([
     venue({ id: "base:moonwell:usdc", apy_base: 14.5 }),
     venue({ id: "base:aave-v3:usdc", apy_base: 4.2 }),
@@ -219,7 +287,8 @@ async function main() {
     venue({ id: "base:morpho:eth", apy_base: 12, apy_reward: 3 }),
   ]);
   assert.equal(vmap.size, 4);
-  const sum = (x: Partial<AssetSummary>) => x as AssetSummary;
+  const sum = (x: Partial<AssetSummary>) =>
+    ({ best_liquidity_known: true, best_liquidity_usd: 1e9, ...x }) as AssetSummary;
   assert.equal(assetWarning(undefined), UNKNOWN_YIELD_WARNING);
   assert.equal(
     assetWarning(sum({ venues: 0, routable_venues: 0, best_apy: 0 })),
@@ -249,9 +318,39 @@ async function main() {
   // Split rate absent is unknown, not zero emissions.
   assert.equal(assetWarning(sum({ venues: 1, routable_venues: 1, best_apy: 9 })), null);
 
+  // The liquidity of the venue we would actually route into, not the asset's total.
+  assert.match(
+    assetWarning(
+      sum({ venues: 1, routable_venues: 1, best_apy: 4, best_liquidity_usd: 48_071 }),
+    ) ?? "",
+    /thin exit liquidity/,
+  );
+  assert.equal(
+    assetWarning(
+      sum({ venues: 1, routable_venues: 1, best_apy: 4, best_liquidity_known: false }),
+    ),
+    UNKNOWN_LIQUIDITY_WARNING,
+  );
+
   assert.equal(venueWarning(venue({ apy: 0, apy_base: 0 })), NO_YIELD_WARNING);
   assert.equal(venueWarning(venue({ apy: 14.5, apy_base: 14.5 })), EMISSIONS_WARNING);
   assert.equal(venueWarning(venue({ apy: 4, apy_base: 4 })), null);
+
+  // Unknown is not fine: a venue that publishes no withdrawable liquidity says so.
+  assert.equal(
+    venueWarning(venue({ apy: 4, apy_base: 4, liquidity_known: false })),
+    UNKNOWN_LIQUIDITY_WARNING,
+  );
+  assert.equal(liquidityWarning(venue({ liquidity_usd: THIN_LIQUIDITY_USD })), null);
+  assert.match(
+    venueWarning(venue({ apy: 4, apy_base: 4, liquidity_usd: 48_071 })) ?? "",
+    /thin exit liquidity \(\$48\.1K\)/,
+  );
+  // Thin liquidity outranks emissions: one stops the rate, the other the exit.
+  assert.match(
+    venueWarning(venue({ apy: 14.5, apy_base: 14.5, liquidity_usd: 1_000 })) ?? "",
+    /thin exit liquidity/,
+  );
 
   const paths2 = new Set(["USDC", "cbBTC", "WETH"]);
   const reach = [
@@ -266,6 +365,18 @@ async function main() {
   );
   // Unknown paths must not empty the picker.
   assert.equal(reachableAssets(reach, null).length, 4);
+  // Zero-venue assets are buy-and-hold, not hidden.
+  assert.deepEqual(
+    reachableAssets(
+      [sum({ asset: "DAI", venues: 0, routable_venues: 0, best_apy: 0 })],
+      new Set(["DAI"]),
+    ).map((a) => a.asset),
+    ["DAI"],
+  );
+  assert.equal(
+    assetWarning(sum({ asset: "DAI", venues: 0, routable_venues: 0, best_apy: 0 })),
+    NO_YIELD_WARNING,
+  );
   assert.deepEqual(
     reachableVenues(
       [

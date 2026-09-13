@@ -77,6 +77,26 @@ func (c *Client) Venues(ctx context.Context, asset, chain string, minTVL float64
 	return env.Data.Venues, err
 }
 
+type Asset struct {
+	Asset    string  `json:"asset"`
+	Chain    string  `json:"chain"`
+	Family   string  `json:"family"`
+	Venues   int     `json:"venues"`
+	Routable int     `json:"routable_venues"`
+	BestAPY  float64 `json:"best_apy"`
+}
+
+// Sorted by best APY, highest first, by the market-data service.
+func (c *Client) Assets(ctx context.Context, chain string) ([]Asset, error) {
+	var env struct {
+		Data struct {
+			Assets []Asset `json:"assets"`
+		} `json:"data"`
+	}
+	err := c.get(ctx, "/assets?"+url.Values{"chain": {chain}}.Encode(), &env)
+	return env.Data.Assets, err
+}
+
 func (c *Client) get(ctx context.Context, path string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {

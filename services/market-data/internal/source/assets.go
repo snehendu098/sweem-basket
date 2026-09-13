@@ -35,10 +35,14 @@ var (
 		"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",
 		"0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0": "wstETH",
 		"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": "WBTC",
+		"0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": "USDT",
+		"0x0555e30da8f98308edb960aa94c0db47230d2b9c": "WBTC",
+		"0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34": "USDe",
+		"0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b": "VIRTUAL",
 	}
 
 	knownAssets = []string{
-		"syrupUSDC", "USDbC", "USDC", "USDT", "sUSDS", "USDS", "DAI", "EURC", "GHO",
+		"syrupUSDC", "USDbC", "USDC", "USDT", "USDe", "sUSDS", "USDS", "DAI", "EURC", "GHO",
 		"wstETH", "cbETH", "weETH", "wrsETH", "ezETH", "rETH", "WETH", "ETH",
 		"cbBTC", "WBTC", "tBTC", "LBTC", "AERO",
 	}
@@ -93,7 +97,8 @@ var assetFamilies = map[string]string{
 	"0x6bb7a212910682dcfdbd5bcbb3e28fb4e8da10ee": "USD", // GHO
 	"0x50c5725949a6f0c72e6c4a641f24049a917db0cb": "USD", // DAI
 	"0x6b175474e89094c44da98b954eedeac495271d0f": "USD", // DAI, ethereum
-	"0xdac17f958d2ee523a2206206994597c13d831ec7": "USD", // USDT
+	"0xdac17f958d2ee523a2206206994597c13d831ec7": "USD", // USDT, ethereum
+	"0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": "USD", // USDT
 	"0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34": "USD", // USDe
 	// EUR
 	"0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42": "EUR", // EURC
@@ -108,7 +113,8 @@ var assetFamilies = map[string]string{
 	"0xedfa23602d0ec14714057867a78d01e94176bea0": "ETH", // wrsETH
 	// BTC
 	"0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "BTC", // cbBTC
-	"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": "BTC", // WBTC
+	"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": "BTC", // WBTC, ethereum
+	"0x0555e30da8f98308edb960aa94c0db47230d2b9c": "BTC", // WBTC
 	// Singletons: no substitute exists, so no family.
 	"0x2416092f143378750bb29b79ed961ab195cceea5": FamilyNone, // ezETH, restaking
 	"0x236aa50979d5f3de3bd1eeb40e81137f22ab794b": FamilyNone, // tBTC

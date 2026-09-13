@@ -236,6 +236,8 @@ type PlanLeg struct {
 	PriceUSD    *float64          `json:"price_usd"`
 	AmountToken *float64          `json:"amount_token"`
 	Venue       *marketdata.Venue `json:"venue,omitempty"`
+	Family      string            `json:"family,omitempty"`
+	Hold        bool              `json:"hold,omitempty"`
 	Reason      string            `json:"reason"`
 }
 
@@ -365,6 +367,23 @@ func tokenAPINetwork(chain string) string {
 		return "base-sepolia"
 	}
 	return "base"
+}
+
+func familyReason(family, chain string, err error) string {
+	if errors.Is(err, ErrNoFamilyInstrument) {
+		return "no routable instrument for the " + family + " family on " + chain + "; funds stay idle"
+	}
+	return "could not resolve the " + family + " family; funds stay idle"
+}
+
+func holdReason(asset string, err error) string {
+	if asset == QuoteAsset {
+		return "no venue meets the liquidity floor; funds stay idle"
+	}
+	if errors.Is(err, ErrNoRoutableVenue) {
+		return "no " + asset + " venue can be transacted by the executor; bought and held in your wallet, earning nothing"
+	}
+	return "no yield venue for " + asset + "; bought and held in your wallet, earning nothing"
 }
 
 func priceReason(asset string, err error) string {

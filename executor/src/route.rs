@@ -119,17 +119,17 @@ pub async fn route(
                 _ => swap_deposit(&state, &req, to, owner).await?,
             }
         }
-        "withdraw" => {
-            let v = from.ok_or_else(|| {
-                RouteResponse::failed(&req.execution_id, "withdraw requires from_venue_id")
-            })?;
-            if v.kind == VenueKind::Hold {
-                hold_exit(&state, &req, v, owner).await?.0
-            } else {
+        "withdraw" => match from {
+            Some(v) if v.kind == VenueKind::Hold => {
+                same_symbol(&req, v)?;
+                swap_exit(&state, &req, owner).await?.0
+            }
+            Some(v) => {
                 let amount = units(&req, v)?;
                 vec![encode(withdraw_call(v, amount, owner), &req)?]
             }
-        }
+            None => swap_exit(&state, &req, owner).await?.0,
+        },
         "rebalance" => {
             let (src, dst) = match (from, to) {
                 (Some(a), Some(b)) => (a, b),
@@ -156,7 +156,8 @@ pub async fn route(
                         ),
                     ));
                 }
-                let (mut calls, usdc) = hold_exit(&state, &req, src, owner).await?;
+                same_symbol(&req, src)?;
+                let (mut calls, usdc) = swap_exit(&state, &req, owner).await?;
                 calls.push(approve_call(dst, usdc));
                 calls.push(encode(deposit_call(dst, usdc, owner), &req)?);
                 calls
@@ -343,18 +344,24 @@ async fn swap_deposit(
     Ok(calls)
 }
 
-async fn hold_exit(
-    state: &AppState,
+fn same_symbol(
     req: &RouteRequest,
     venue: &Venue,
-    owner: Address,
-) -> Result<(Vec<Call>, alloy_primitives::U256), (StatusCode, Json<RouteResponse>)> {
+) -> Result<(), (StatusCode, Json<RouteResponse>)> {
     if venue.symbol != req.asset {
         return Err(RouteResponse::failed(
             &req.execution_id,
             format!("venue {} holds {}, not {}", venue.id, venue.symbol, req.asset),
         ));
     }
+    Ok(())
+}
+
+async fn swap_exit(
+    state: &AppState,
+    req: &RouteRequest,
+    owner: Address,
+) -> Result<(Vec<Call>, alloy_primitives::U256), (StatusCode, Json<RouteResponse>)> {
     let path: &SwapPath = state
         .swaps
         .get(req.chain_id, &req.asset, FUNDING_ASSET)
@@ -369,7 +376,7 @@ async fn hold_exit(
         })?;
 
     let amount_in = hold_units(state, req).await?;
-    let min_out = quote_min_out(state, req, path, amount_in, "hold exit quoted").await?;
+    let min_out = quote_min_out(state, req, path, amount_in, "exit leg quoted").await?;
     Ok((
         vec![
             path.approve_router(amount_in),
@@ -718,6 +725,51 @@ mod tests {
             err.1.error
         );
         assert!(err.1.steps.is_empty(), "nothing may be submitted without a quote");
+    }
+
+    #[tokio::test]
+    async fn a_venueless_withdraw_swaps_back_to_usdc() {
+        let mut r = req("withdraw");
+        r.asset = "wstETH".into();
+        let err = route(State(state()), Json(r)).await.unwrap_err();
+        assert!(
+            !err.1.error.contains("from_venue_id"),
+            "a loose position needs no venue: {}",
+            err.1.error
+        );
+        assert_eq!(err.0, StatusCode::BAD_GATEWAY, "{}", err.1.error);
+        assert!(
+            err.1.error.contains("could not price") || err.1.error.contains("could not quote"),
+            "{}",
+            err.1.error
+        );
+        assert!(err.1.steps.is_empty());
+
+        let s = state();
+        let path = s.swaps.get(8453, "wstETH", "USDC").expect("allowlisted exit");
+        let amount = alloy_primitives::U256::from(1u64);
+        let calls = vec![
+            path.approve_router(amount),
+            path.swap_call(amount, amount, Address::repeat_byte(0x33)),
+        ];
+        assert_eq!(calls[0].to, path.token_in);
+        assert_eq!(calls[1].to, path.router, "the swap must target the allowlisted router");
+    }
+
+    #[tokio::test]
+    async fn a_venueless_usdc_withdraw_is_refused() {
+        let err = route(State(state()), Json(req("withdraw"))).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.error.contains("no allowlisted swap path"), "{}", err.1.error);
+    }
+
+    #[tokio::test]
+    async fn a_hold_withdraw_of_another_asset_is_refused() {
+        let mut r = hold_req("withdraw");
+        r.asset = "WETH".into();
+        let err = route(State(state_with_hold()), Json(r)).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.error.contains("not WETH"), "{}", err.1.error);
     }
 
     #[tokio::test]

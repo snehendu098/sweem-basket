@@ -82,9 +82,24 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			WeightBps: weight.WeightBps,
 			AmountUSD: amounts[i],
 		}
-		price, perr := s.priceUSD(r.Context(), b.Chain, weight.Asset)
+		asset := weight.Asset
+		if store.IsFamily(asset) {
+			leg.Family = asset
+			resolved, ferr := s.resolveFamily(r.Context(), asset, b.Chain)
+			if ferr != nil {
+				if !errors.Is(ferr, ErrNoFamilyInstrument) {
+					s.Log.Warn("family resolution", "family", asset, "err", ferr)
+				}
+				leg.Reason = familyReason(asset, b.Chain, ferr)
+				legs = append(legs, leg)
+				continue
+			}
+			asset, leg.Asset = resolved, resolved
+		}
+
+		price, perr := s.priceUSD(r.Context(), b.Chain, asset)
 		if perr != nil {
-			leg.Reason = priceReason(weight.Asset, perr)
+			leg.Reason = priceReason(asset, perr)
 			legs = append(legs, leg)
 			continue
 		}
@@ -94,12 +109,12 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			leg.AmountToken = &tokens
 		}
 
-		if serr := s.swapFundable(r.Context(), weight.Asset, b.Chain); serr != nil {
+		if serr := s.swapFundable(r.Context(), asset, b.Chain); serr != nil {
 			if errors.Is(serr, ErrNoSwapPath) {
 				leg.Reason = fmt.Sprintf("no %s swap route to %s on %s; this leg cannot be funded",
-					QuoteAsset, weight.Asset, b.Chain)
+					QuoteAsset, asset, b.Chain)
 			} else {
-				s.Log.Warn("swap path lookup", "asset", weight.Asset, "err", serr)
+				s.Log.Warn("swap path lookup", "asset", asset, "err", serr)
 				leg.Reason = "executor swap routes unavailable; this leg cannot be funded"
 			}
 			legs = append(legs, leg)
@@ -112,19 +127,18 @@ func (s *Server) planLegs(r *http.Request, b store.Basket, amountUSD float64) ([
 			err  error
 		)
 		if weight.VenueID != "" {
-			v, err = s.pinnedRoutable(r.Context(), weight.VenueID, weight.Asset, b.Chain)
+			v, err = s.pinnedRoutable(r.Context(), weight.VenueID, asset, b.Chain)
 		} else {
-			v, note, err = s.bestRoutable(r.Context(), weight.Asset, b.Chain)
+			v, note, err = s.bestRoutable(r.Context(), asset, b.Chain)
 		}
 		switch {
 		case errors.Is(err, ErrPinUnusable):
 			leg.Reason = err.Error() + "; this leg was not routed elsewhere"
-		case errors.Is(err, marketdata.ErrNoVenue):
-			leg.Reason = "no venue meets the liquidity floor; funds stay idle"
-		case errors.Is(err, ErrNoRoutableVenue):
-			leg.Reason = "no venue for this asset can be transacted by the executor; funds stay idle"
+		case errors.Is(err, marketdata.ErrNoVenue), errors.Is(err, ErrNoRoutableVenue):
+			leg.Hold = asset != QuoteAsset
+			leg.Reason = holdReason(asset, err)
 		case err != nil:
-			s.Log.Warn("routable venue lookup", "asset", weight.Asset, "err", err)
+			s.Log.Warn("routable venue lookup", "asset", asset, "err", err)
 			leg.Reason = "market data unavailable"
 		default:
 			leg.Venue = &v
@@ -180,6 +194,10 @@ const (
 // ponytail: sentinel venue ID, not a column; add a real `state` column if
 // positions grow more lifecycle states than "placed" and "idle".
 const IdleVenueID = "idle:wallet"
+
+// Distinct from idle: idle means a rebalance stranded the funds mid-move, and
+// withdraw refuses to touch it. Hold is a position the user asked for.
+const HoldVenueID = "hold:wallet"
 
 func legOutcome(resp executor.RouteResponse, err error) (dbStatus, legStatus, reason string) {
 	switch {
@@ -291,7 +309,7 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 
 	for _, leg := range legs {
 		res := LegResult{Asset: leg.Asset, AmountUSD: leg.AmountUSD}
-		if leg.Venue == nil || leg.AmountUSD <= 0 {
+		if (leg.Venue == nil && !leg.Hold) || leg.AmountUSD <= 0 {
 			res.Status, res.Reason = legSkipped, leg.Reason
 			if leg.AmountUSD <= 0 {
 				res.Reason = "leg rounds to zero"
@@ -299,7 +317,18 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		}
-		res.VenueID, res.Project, res.APY = leg.Venue.ID, leg.Venue.Project, leg.Venue.APY
+
+		venueID, project, apy, chain := HoldVenueID, "wallet", float64(0), b.Chain
+		if leg.Venue != nil {
+			venueID, project, apy, chain = leg.Venue.ID, leg.Venue.Project, leg.Venue.APY, leg.Venue.Chain
+		}
+		res.VenueID, res.Project, res.APY = venueID, project, apy
+
+		// An empty to_venue_id is the hold case: the executor swaps and stops.
+		toVenueID := ""
+		if leg.Venue != nil {
+			toVenueID = leg.Venue.ID
+		}
 
 		basketID := b.ID
 		_, _, out := s.run(r, u, store.Execution{
@@ -307,14 +336,14 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			BasketID:  &basketID,
 			Kind:      "deposit",
 			Asset:     leg.Asset,
-			ToVenue:   &leg.Venue.ID,
+			ToVenue:   &venueID,
 			AmountUSD: leg.AmountUSD,
 		}, executor.RouteRequest{
 			Chain:     b.Chain,
 			Asset:     leg.Asset,
 			AmountUSD: leg.AmountUSD,
 			Action:    "deposit",
-			ToVenueID: leg.Venue.ID,
+			ToVenueID: toVenueID,
 		})
 		res.ExecutionID, res.TxHash, res.Status, res.Reason, res.Steps =
 			out.ExecutionID, out.TxHash, out.Status, out.Reason, out.Steps
@@ -337,11 +366,11 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			UserID:    u.ID,
 			BasketID:  b.ID,
 			Asset:     leg.Asset,
-			VenueID:   leg.Venue.ID,
-			Chain:     leg.Venue.Chain,
-			Project:   leg.Venue.Project,
+			VenueID:   venueID,
+			Chain:     chain,
+			Project:   project,
 			AmountUSD: leg.AmountUSD,
-			EntryAPY:  leg.Venue.APY,
+			EntryAPY:  apy,
 		}); err != nil {
 			s.Log.Error("upsert position", "asset", leg.Asset, "err", err)
 			res.Reason = "submitted, but the position record failed to save"
@@ -444,6 +473,11 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		fromVenue := p.VenueID
+		if fromVenue == HoldVenueID {
+			fromVenue = ""
+		}
+
 		bid := p.BasketID
 		_, _, out := s.run(r, u, store.Execution{
 			UserID:    u.ID,
@@ -457,7 +491,7 @@ func (s *Server) withdraw(w http.ResponseWriter, r *http.Request) {
 			Asset:       p.Asset,
 			AmountUSD:   legUSD,
 			Action:      "withdraw",
-			FromVenueID: p.VenueID,
+			FromVenueID: fromVenue,
 		})
 		res.ExecutionID, res.TxHash, res.Status, res.Reason, res.Steps =
 			out.ExecutionID, out.TxHash, out.Status, out.Reason, out.Steps
@@ -529,6 +563,11 @@ func (s *Server) rebalance(w http.ResponseWriter, r *http.Request) {
 	pins := s.pinsFor(r, positions)
 	for _, p := range positions {
 		res := LegResult{Asset: p.Asset, AmountUSD: p.AmountUSD, FromVenueID: p.VenueID}
+		if p.VenueID == HoldVenueID {
+			res.Status, res.Reason = legSkipped, "held in your wallet; withdraw and redeposit to route it to a venue"
+			results = append(results, res)
+			continue
+		}
 		if pin, ok := pins[p.BasketID+":"+p.Asset]; ok && pin == p.VenueID {
 			res.Status, res.Reason, res.VenueID = legSkipped, "pinned to "+pin, pin
 			results = append(results, res)

@@ -12,6 +12,7 @@ import {
   fmtPct,
   fmtTime,
   fmtUsd,
+  planFlowLegs,
   publicBasket,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
@@ -27,9 +28,11 @@ import {
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { CountUp, Reveal, Segmented } from "@/components/motion";
-import { BasketFlow, type FlowLeg } from "@/components/basket/BasketFlow";
+import { BasketFlow } from "@/components/basket/BasketFlow";
 import {
+  HOLD_VENUE_ID,
   IDLE_VENUE_ID,
+  type FlowLeg,
   type Basket,
   type BasketSummary,
   type Plan,
@@ -85,24 +88,21 @@ export default function BasketPage() {
 
   const legs = useMemo((): FlowLeg[] => {
     if (holdings.length > 0) {
-      return holdings.map((h) => ({
-        asset: h.asset,
-        amountUsd: h.onchain_usd ?? h.amount_usd,
-        venue:
-          h.venue_id === IDLE_VENUE_ID
-            ? null
-            : { project: h.project, apy: h.current_apy },
-        idle: h.venue_id === IDLE_VENUE_ID,
-        reason: h.value_reason,
-      }));
+      return holdings.map((h) => {
+        const idle = h.venue_id === IDLE_VENUE_ID;
+        const hold = h.venue_id === HOLD_VENUE_ID;
+        return {
+          asset: h.asset,
+          amountUsd: h.onchain_usd ?? h.amount_usd,
+          venue:
+            idle || hold ? null : { project: h.project, apy: h.current_apy },
+          idle,
+          hold,
+          reason: h.value_reason,
+        };
+      });
     }
-    return (plan.data?.legs ?? []).map((l) => ({
-      asset: l.asset,
-      amountUsd: l.price_usd === null ? null : l.amount_usd,
-      venue: l.venue ? { project: l.venue.project, apy: l.venue.apy } : null,
-      idle: false,
-      reason: l.reason,
-    }));
+    return planFlowLegs(plan.data?.legs);
   }, [holdings, plan.data]);
 
   const apy =

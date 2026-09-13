@@ -81,6 +81,8 @@ export type AssetSummary = {
   total_tvl_usd: number;
   family?: string;
   routable_venues?: number;
+  best_liquidity_usd?: number;
+  best_liquidity_known?: boolean;
   best_apy_base?: number;
   best_apy_reward?: number;
   best_apy_intrinsic?: number;
@@ -103,7 +105,19 @@ export type PlanLeg = {
   price_usd: number | null;
   amount_token: number | null;
   venue?: Venue;
+  family?: string;
+  hold?: boolean;
   reason: string;
+};
+
+export type FlowLeg = {
+  asset: string;
+  amountUsd: number | null;
+  venue: { project: string; apy: number } | null;
+  idle: boolean;
+  hold?: boolean;
+  family?: string;
+  reason?: string;
 };
 
 export type Plan = {
@@ -169,4 +183,5 @@ export type SettleResult = {
 };
 
 export const IDLE_VENUE_ID = "idle:wallet";
+export const HOLD_VENUE_ID = "hold:wallet";
 export const TOTAL_BPS = 10000;

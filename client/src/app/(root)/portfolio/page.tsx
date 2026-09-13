@@ -23,6 +23,7 @@ import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToa
 import { TokenIcon } from "@/components/TokenIcon";
 import { Reveal } from "@/components/motion";
 import {
+  HOLD_VENUE_ID,
   IDLE_VENUE_ID,
   type Basket,
   type Holding,
@@ -223,7 +224,8 @@ export default function PortfolioPage() {
 
 function Row({ h }: { h: Holding }) {
   const idle = h.venue_id === IDLE_VENUE_ID;
-  const drift = !idle && h.drift_apy > 0;
+  const held = h.venue_id === HOLD_VENUE_ID;
+  const drift = !idle && !held && h.drift_apy > 0;
   return (
     <li className="p-5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -232,11 +234,17 @@ function Row({ h }: { h: Holding }) {
           {displayAsset(h.asset)}
         </span>
         <span className="text-xs text-muted-foreground">
-          {idle ? "idle in wallet" : displayProject(h.project)}
+          {idle
+            ? "idle in wallet"
+            : held
+              ? "held in wallet · no yield venue"
+              : displayProject(h.project)}
         </span>
         <span className="tnum ml-auto">{fmtUsd(h.amount_usd)}</span>
-        <span className="tnum w-16 text-right text-sm text-positive">
-          {idle ? "—" : fmtPct(h.current_apy)}
+        <span
+          className={`tnum w-16 text-right text-sm ${held ? "text-muted-foreground" : "text-positive"}`}
+        >
+          {idle || held ? "—" : fmtPct(h.current_apy)}
         </span>
       </div>
 

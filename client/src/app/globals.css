@@ -60,6 +60,33 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+  background-clip: content-box;
+}
+
 .no-scrollbar {
   scrollbar-width: none;
 }
@@ -95,6 +122,8 @@ body {
   --border: oklch(1 0 0 / 6%);
   --input: oklch(1 0 0 / 10%);
   --ring: #c4f56a;
+  --scrollbar: oklch(1 0 0 / 14%);
+  --scrollbar-hover: oklch(1 0 0 / 26%);
   --chart-1: oklch(0.76 0.1 190);
   --chart-2: oklch(0.66 0 0);
   --chart-3: oklch(0.5 0 0);

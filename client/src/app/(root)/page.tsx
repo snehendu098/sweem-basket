@@ -11,19 +11,23 @@ import {
   blendApy,
   displayAsset,
   displayProject,
-  evenSplit,
   fmtPct,
   fmtUsd,
+  fmtUsdOrUnknown,
   groupOf,
+  legLabel,
   marketAssets,
   marketVenues,
+  planFlowLegs,
   reachableAssets,
   reachableVenues,
   remapSelection,
   swapPaths,
   swappableAssets,
+  venueProject,
   venueWarning,
   venuesById,
+  weightsFor,
 } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
@@ -38,17 +42,20 @@ import {
 import { TokenPicker, type PickOption } from "@/components/TokenPicker";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
+import { BasketFlow } from "@/components/basket/BasketFlow";
 import { CountUp, Reveal } from "@/components/motion";
+import { cn } from "@/lib/utils";
 import {
   TOTAL_BPS,
   type Basket,
+  type FlowLeg,
   type Plan,
   type Portfolio,
   type SettleResult,
 } from "@/lib/types";
 
 type Phase = "idle" | "creating" | "funding" | "funded";
-type Mode = "simple" | "advanced";
+type Mode = "auto" | "manual";
 
 type Choice = PickOption & { venueId?: string; family?: boolean };
 
@@ -60,7 +67,7 @@ export default function Create() {
 
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [mode, setMode] = useState<Mode>("simple");
+  const [mode, setMode] = useState<Mode>("auto");
   const [dropped, setDropped] = useState<string[]>([]);
   const [amount, setAmount] = useState("1000");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -73,9 +80,9 @@ export default function Create() {
   const swappable = swaps.data
     ? swappableAssets(swaps.data, chain.chainId)
     : null;
-  // Advanced only: the summary now carries the split rate, so warnings need no join.
+  // Manual only: the summary now carries the split rate, so warnings need no join.
   const venues = useAsync(`venues:${chain.label}:${mode}`, () =>
-    mode === "advanced" ? marketVenues() : Promise.resolve(null),
+    mode === "manual" ? marketVenues() : Promise.resolve(null),
   );
   const byVenue = venues.data ? venuesById(venues.data.venues) : null;
   const list = reachableAssets(assets.data?.assets ?? [], swappable);
@@ -94,7 +101,7 @@ export default function Create() {
 
   const groups = assetGroups(list, assets.data?.families);
 
-  const simple: Choice[] = groups.map((g) => {
+  const autoChoices: Choice[] = groups.map((g) => {
     const a = g.best;
     const sym = g.family ? g.id : displayAsset(a.asset);
     return {
@@ -113,13 +120,16 @@ export default function Create() {
   });
 
   const taken = new Map<string, string>();
-  if (mode === "advanced") {
+  if (mode === "manual") {
     for (const id of picked) {
       const v = byVenue?.get(id);
       if (v && !taken.has(v.asset)) taken.set(v.asset, id);
     }
   }
-  const advanced: Choice[] = reachableVenues(venues.data?.venues ?? [], swappable)
+  const manualChoices: Choice[] = reachableVenues(
+    venues.data?.venues ?? [],
+    swappable,
+  )
     .sort(
       (a, b) =>
         displayProject(a.project).localeCompare(displayProject(b.project)) ||
@@ -144,7 +154,7 @@ export default function Create() {
       };
     });
 
-  const options = mode === "simple" ? simple : advanced;
+  const options = mode === "auto" ? autoChoices : manualChoices;
   const tiles = [...options]
     .filter((o) => !o.disabled)
     .sort((a, b) => b.tvl - a.tvl)
@@ -157,17 +167,14 @@ export default function Create() {
   };
 
   const chosen = options.filter((o) => picked.includes(o.id) && !o.disabled);
-  const settling = mode === "advanced" ? venues.loading : assets.loading;
+  const settling = mode === "manual" ? venues.loading : assets.loading;
   const orphans = settling
     ? []
     : picked.filter((id) => !options.some((o) => o.id === id));
-  const split = evenSplit(chosen.map((o) => o.asset)).map((w, i) =>
-    chosen[i].venueId ? { ...w, venue_id: chosen[i].venueId } : w,
-  );
-  const pct = evenSplit(chosen.map((o) => o.asset), 100);
+  const split = weightsFor(chosen);
   const apy = blendApy(
     split,
-    chosen.map((o) => ({ asset: o.asset, best_apy: o.apy })),
+    split.map((w, i) => ({ asset: w.asset, best_apy: chosen[i].apy })),
   );
 
   // Venue rows may still be loading, so a mapped id is verified against the
@@ -175,7 +182,7 @@ export default function Create() {
   function switchMode(next: Mode) {
     if (next === mode) return;
     const toId =
-      next === "advanced"
+      next === "manual"
         ? (id: string) => groups.find((x) => x.id === id)?.best.best_venue ?? null
         : (id: string) => groupOf(byVenue?.get(id)?.asset ?? "", groups)?.id ?? null;
     const res = remapSelection(picked, toId);
@@ -269,11 +276,27 @@ export default function Create() {
     await fund(basket.id);
   }
 
-  const legs = plan.data?.legs ?? null;
+  const preview: FlowLeg[] = split.map((w, i) => {
+    const o = chosen[i];
+    const v = o.venueId ? byVenue?.get(o.venueId) : undefined;
+    const a = v ? undefined : list.find((x) => x.asset === o.asset);
+    const id = v?.id ?? a?.best_venue;
+    return {
+      asset: o.asset,
+      amountUsd: amountValid ? (parsed * w.weight_bps) / TOTAL_BPS : null,
+      venue:
+        id && o.apy > 0 ? { project: venueProject(id), apy: o.apy } : null,
+      idle: false,
+      family: o.family ? o.id : undefined,
+      reason: o.warning ?? "",
+    };
+  });
+  const legs = plan.data ? planFlowLegs(plan.data.legs) : preview;
+  const warnings = new Map(chosen.map((o) => [o.asset, o.warning]));
 
   return (
     <main className="w-full px-4 pb-24 pt-8">
-      <Reveal className="mx-auto w-full max-w-lg space-y-6">
+      <Reveal className="mx-auto w-full max-w-5xl space-y-6">
         <h1 className="text-lg font-medium">Create a basket</h1>
 
         <div className="flex items-stretch gap-6 px-1">
@@ -296,235 +319,228 @@ export default function Create() {
           </div>
         </div>
 
-        <Panel>
-          <div className="p-5">
-            <Label>Name</Label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Stable Core"
-              aria-label="Basket name"
-              disabled={locked}
-              className="mt-3 w-full bg-transparent text-2xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40 disabled:text-muted-foreground"
-            />
-          </div>
+        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+          <Panel>
+            <div className="p-5">
+              <Label>Name</Label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Stable Core"
+                aria-label="Basket name"
+                disabled={locked}
+                className="mt-3 w-full bg-transparent text-2xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40 disabled:text-muted-foreground"
+              />
+            </div>
 
-          <Divider />
+            <Divider />
 
-          <div className="p-5">
-            <div className="flex items-center justify-between">
+            <div className="p-5">
               <Label>Tokens</Label>
+              {assets.loading ? (
+                <div className="mt-4">
+                  <Spinner label="Loading tokens…" />
+                </div>
+              ) : assets.error ? (
+                <div className="mt-4">
+                  <ErrorBox message={assets.error} />
+                </div>
+              ) : options.length === 0 ? (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  {mode === "manual"
+                    ? venues.error ?? `No venues indexed on ${chain.name} yet.`
+                    : `No tokens indexed on ${chain.name} yet.`}
+                </p>
+              ) : (
+                <Reveal key={mode} className="mt-4" y={4}>
+                  <TokenPicker
+                    heading={mode === "auto" ? "Select tokens" : "Select venues"}
+                    placeholder={mode === "auto" ? "Select tokens" : "Select venues"}
+                    options={options}
+                    tiles={tiles}
+                    values={picked}
+                    onToggle={toggle}
+                    disabled={locked}
+                  />
+                </Reveal>
+              )}
+
+              {chosen.some((o) => o.family) && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  the instrument shown is fixed at deposit and not re-picked afterwards
+                </p>
+              )}
+
+              {(dropped.length > 0 || orphans.length > 0) && (
+                <p className="mt-3 text-xs text-warning">
+                  not carried over to {mode} mode:{" "}
+                  {[...dropped, ...orphans.map(labelOf)].join(", ")} — no reachable{" "}
+                  {mode === "auto" ? "family" : "venue"} matches, reselect if you
+                  want them
+                </p>
+              )}
+
+              {swaps.error && (
+                <p className="mt-3 text-xs text-warning">
+                  could not read the swap allowlist ({swaps.error}) — nothing is
+                  hidden, so a token with no route will surface at deposit instead
+                  of here
+                </p>
+              )}
+            </div>
+
+            <Divider />
+
+            <div className="p-5">
+              <div className="flex items-center justify-between">
+                <Label>Deposit</Label>
+                {balance && (
+                  <button
+                    type="button"
+                    onClick={() => setAmount(String(balance.value))}
+                    className="tnum text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {balance.value} {balance.symbol}
+                  </button>
+                )}
+              </div>
+              <div className="mt-4 flex items-center gap-3">
+                <input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  inputMode="decimal"
+                  aria-label="Amount in USDC"
+                  placeholder="0.00"
+                  className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
+                />
+                <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">
+                  <TokenIcon symbol={QUOTE_ASSET} size={20} />
+                  {QUOTE_ASSET}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-5 pt-0">
+              <Button
+                className="w-full py-3"
+                disabled={
+                  busy ||
+                  step === "loading" ||
+                  step === "syncing" ||
+                  (step === "ready" && !canSubmit)
+                }
+                onClick={() => void submit()}
+              >
+                {phase === "creating"
+                  ? "Creating basket…"
+                  : phase === "funding"
+                    ? `Depositing ${amountValid ? fmtUsd(parsed) : ""}…`
+                    : step === "connect"
+                      ? "Connect"
+                      : step === "wallet"
+                        ? "Create wallet"
+                        : step === "delegate"
+                          ? "Enable delegation"
+                          : step === "syncing" || step === "loading"
+                            ? "…"
+                            : phase === "funded"
+                              ? "Open basket"
+                              : created
+                                ? `Retry deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`
+                                : `Create & deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`}
+              </Button>
+            </div>
+          </Panel>
+
+          <Panel>
+            <div className="flex items-center justify-between px-5 pt-5">
+              <Label>Routing</Label>
               <button
                 type="button"
                 role="switch"
-                aria-checked={mode === "advanced"}
+                aria-checked={mode === "manual"}
                 disabled={locked}
-                onClick={() => switchMode(mode === "simple" ? "advanced" : "simple")}
+                onClick={() => switchMode(mode === "auto" ? "manual" : "auto")}
                 className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
               >
-                Advanced
+                Manual
                 <span
                   className={`ml-2 inline-block h-1.5 w-1.5 rounded-full align-middle ${
-                    mode === "advanced" ? "bg-foreground" : "bg-border"
+                    mode === "manual" ? "bg-foreground" : "bg-border"
                   }`}
                 />
               </button>
             </div>
-            {assets.loading ? (
-              <div className="mt-4">
-                <Spinner label="Loading tokens…" />
-              </div>
-            ) : assets.error ? (
-              <div className="mt-4">
-                <ErrorBox message={assets.error} />
-              </div>
-            ) : options.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                {mode === "advanced"
-                  ? venues.error ?? `No venues indexed on ${chain.name} yet.`
-                  : `No tokens indexed on ${chain.name} yet.`}
-              </p>
-            ) : (
-              <Reveal key={mode} className="mt-4" y={4}>
-                <TokenPicker
-                  heading={mode === "simple" ? "Select tokens" : "Select venues"}
-                  placeholder={mode === "simple" ? "Select tokens" : "Select venues"}
-                  options={options}
-                  tiles={tiles}
-                  values={picked}
-                  onToggle={toggle}
-                  disabled={locked}
-                />
-              </Reveal>
-            )}
 
-            {chosen.some((o) => o.family) && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                the instrument shown is fixed at deposit and not re-picked afterwards
-              </p>
-            )}
+            <BasketFlow
+              legs={legs}
+              swapMark
+              emptyLabel="Pick a token to see where your USDC would go."
+            />
 
-            {(dropped.length > 0 || orphans.length > 0) && (
-              <p className="mt-3 text-xs text-warning">
-                not carried over to {mode} mode:{" "}
-                {[...dropped, ...orphans.map(labelOf)].join(", ")} — no reachable{" "}
-                {mode === "simple" ? "family" : "venue"} matches, reselect if you want
-                them
-              </p>
-            )}
-
-            {swaps.error && (
-              <p className="mt-3 text-xs text-warning">
-                could not read the swap allowlist ({swaps.error}) — nothing is
-                hidden, so a token with no route will surface at deposit instead
-                of here
-              </p>
-            )}
-
-            {chosen.length > 0 && (
-              <div className="mt-5 space-y-1.5">
-                {pct.map((w) => (
-                  <div
-                    key={w.asset}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <TokenIcon symbol={w.asset} size={18} />
-                      <span className="text-muted-foreground">
-                        {displayAsset(w.asset)}
-                      </span>
-                    </span>
-                    <span className="tnum">{w.weight_bps}%</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <Divider />
-
-          <div className="p-5">
-            <div className="flex items-center justify-between">
-              <Label>Deposit</Label>
-              {balance && (
-                <button
-                  type="button"
-                  onClick={() => setAmount(String(balance.value))}
-                  className="tnum text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {balance.value} {balance.symbol}
-                </button>
-              )}
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                inputMode="decimal"
-                aria-label="Amount in USDC"
-                placeholder="0.00"
-                className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
-              />
-              <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">
-                <TokenIcon symbol={QUOTE_ASSET} size={20} />
-                {QUOTE_ASSET}
-              </span>
-            </div>
-          </div>
-
-          <Divider />
-
-          <div className="p-5">
-            <Label>Routing</Label>
-            {chosen.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                Pick a token to see where your USDC would go.
-              </p>
-            ) : legs ? (
-              <ul className="mt-4 space-y-3">
-                {legs.map((l) => (
-                  <li key={l.asset} className="text-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex items-center gap-2">
-                        <TokenIcon symbol={l.asset} size={18} />
-                        {displayAsset(l.asset)}
-                      </span>
-                      <span className="tnum ml-auto">{fmtUsd(l.amount_usd)}</span>
-                      <span className="tnum w-24 truncate text-right text-xs text-muted-foreground">
-                        {l.venue?.project ?? "—"}
-                      </span>
-                      <span className="tnum w-16 text-right text-xs text-positive">
-                        {l.venue ? fmtPct(l.venue.apy) : "—"}
-                      </span>
-                    </div>
-                    {l.price_usd === null && (
-                      <div className="mt-1 text-xs text-warning">
-                        value unknown — {l.reason || "no price feed"}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <ul className="mt-4 space-y-3">
-                {split.map((w) => {
-                  const a = list.find((x) => x.asset === w.asset);
+            {legs.length > 0 && (
+              <div className="space-y-2 px-5 pb-5">
+                {legs.map((l) => {
+                  const warn =
+                    warnings.get(l.asset) ??
+                    (l.amountUsd === null
+                      ? l.reason || "value unknown"
+                      : !l.venue && !l.hold
+                        ? l.reason || "no venue"
+                        : null);
                   return (
-                    <li key={w.asset} className="flex items-center gap-3 text-sm">
-                      <span className="inline-flex items-center gap-2">
-                        <TokenIcon symbol={w.asset} size={18} />
-                        {displayAsset(w.asset)}
-                      </span>
-                      <span className="tnum ml-auto">
-                        {amountValid
-                          ? fmtUsd((parsed * w.weight_bps) / TOTAL_BPS)
-                          : "—"}
-                      </span>
-                      <span className="tnum w-24 truncate text-right text-xs text-muted-foreground">
-                        {a?.best_venue ?? "—"}
-                      </span>
-                      <span className="tnum w-16 text-right text-xs text-positive">
-                        {a ? fmtPct(a.best_apy) : "—"}
-                      </span>
-                    </li>
+                    <div
+                      key={l.asset}
+                      className={cn(
+                        "rounded-xl border p-3",
+                        warn
+                          ? "border-destructive/25 bg-destructive/5"
+                          : "border-border bg-secondary/30",
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <TokenIcon symbol={l.asset} size={22} />
+                        <span className="truncate text-sm font-medium">
+                          {legLabel(l)}
+                        </span>
+                        <span className="tnum ml-auto text-sm">
+                          {fmtUsdOrUnknown(l.amountUsd)}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-3 pl-[30px] text-xs">
+                        <span className="truncate text-muted-foreground">
+                          {l.venue
+                            ? displayProject(l.venue.project)
+                            : l.hold
+                              ? "your wallet"
+                              : "not routed"}
+                        </span>
+                        <span
+                          className={cn(
+                            "tnum ml-auto",
+                            l.venue ? "text-positive" : "text-muted-foreground",
+                          )}
+                        >
+                          {l.venue
+                            ? fmtPct(l.venue.apy)
+                            : l.hold
+                              ? fmtPct(0)
+                              : "—"}
+                        </span>
+                      </div>
+                      {warn && (
+                        <p className="mt-2 text-xs text-destructive/80">{warn}</p>
+                      )}
+                    </div>
                   );
                 })}
-              </ul>
+                {plan.error && (
+                  <p className="text-xs text-warning">{plan.error}</p>
+                )}
+              </div>
             )}
-            {plan.error && <p className="mt-3 text-xs text-warning">{plan.error}</p>}
-          </div>
-
-          <div className="p-5 pt-0">
-            <Button
-              className="w-full py-3"
-              disabled={
-                busy ||
-                step === "loading" ||
-                step === "syncing" ||
-                (step === "ready" && !canSubmit)
-              }
-              onClick={() => void submit()}
-            >
-              {phase === "creating"
-                ? "Creating basket…"
-                : phase === "funding"
-                  ? `Depositing ${amountValid ? fmtUsd(parsed) : ""}…`
-                  : step === "connect"
-                    ? "Connect"
-                    : step === "wallet"
-                      ? "Create wallet"
-                      : step === "delegate"
-                        ? "Enable delegation"
-                        : step === "syncing" || step === "loading"
-                          ? "…"
-                          : phase === "funded"
-                            ? "Open basket"
-                            : created
-                              ? `Retry deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`
-                              : `Create & deposit${amountValid ? ` ${fmtUsd(parsed)}` : ""}`}
-            </Button>
-          </div>
-        </Panel>
+          </Panel>
+        </div>
 
         {created && fundFailed && (
           <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">

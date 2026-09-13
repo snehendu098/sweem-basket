@@ -3,6 +3,8 @@ import {
   type AssetSummary,
   type BasketSummary,
   type Family,
+  type FlowLeg,
+  type PlanLeg,
   type Venue,
   type Weight,
 } from "./types";
@@ -193,6 +195,8 @@ export const venuesById = (venues: Venue[] | null | undefined) =>
 export const NO_YIELD_WARNING = "no yield venue: bought and held, earns nothing";
 export const UNKNOWN_YIELD_WARNING = "no rate published for this token: yield unknown";
 export const EMISSIONS_WARNING = "rate includes token emissions, which can stop";
+export const UNKNOWN_LIQUIDITY_WARNING =
+  "withdrawable liquidity unknown for this venue";
 
 // A source that folds emissions into apy_base reports apy_reward = 0.
 export const EMISSIONS_APY = 10;
@@ -206,20 +210,43 @@ export function assetWarning(asset: AssetSummary | null | undefined): string | n
   if ((asset.routable_venues ?? asset.venues) === 0 || asset.best_apy === 0) {
     return NO_YIELD_WARNING;
   }
+  const thin = liquidityWarning({
+    liquidity_known: asset.best_liquidity_known,
+    liquidity_usd: asset.best_liquidity_usd,
+  });
+  if (thin) return thin;
   return asset.best_apy_base !== undefined && asset.best_apy_reward !== undefined
     ? emissions(asset.best_apy_base, asset.best_apy_reward)
     : null;
 }
 
+// Below this, a $1,000 exit is a visible fraction of what the venue can pay
+// out, so the rate is real but leaving may not be.
+export const THIN_LIQUIDITY_USD = 250_000;
+
+export function liquidityWarning(v: {
+  liquidity_known?: boolean;
+  liquidity_usd?: number;
+}): string | null {
+  if (!v.liquidity_known || v.liquidity_usd === undefined) {
+    return UNKNOWN_LIQUIDITY_WARNING;
+  }
+  return v.liquidity_usd < THIN_LIQUIDITY_USD
+    ? `thin exit liquidity (${fmtUsdCompact(v.liquidity_usd)}): a large withdrawal may not fill`
+    : null;
+}
+
 export function venueWarning(v: Venue): string | null {
-  return v.apy === 0 ? NO_YIELD_WARNING : emissions(v.apy_base, v.apy_reward);
+  if (v.apy === 0) return NO_YIELD_WARNING;
+  return liquidityWarning(v) ?? emissions(v.apy_base, v.apy_reward);
 }
 
 // Unknown paths keep everything: a failed fetch must not empty the picker.
 export const reachableAssets = (
   assets: readonly AssetSummary[],
   targets: ReadonlySet<string> | null,
-): AssetSummary[] => assets.filter((a) => isSwappable(a.asset, targets));
+): AssetSummary[] =>
+  assets.filter((a) => isSwappable(a.asset, targets));
 
 export const reachableVenues = (
   venues: readonly Venue[],
@@ -282,7 +309,16 @@ export function remapSelection(
   return { kept, dropped };
 }
 
-export type Rate = Pick<AssetSummary, "asset" | "best_apy">;
+export type Rate = Pick<AssetSummary, "asset" | "best_apy" | "family">;
+
+// A family weight resolves to its best instrument, as the backend does at deposit.
+function rateOf(key: string, assets: readonly Rate[]): number | null {
+  const exact = assets.find((x) => x.asset === key);
+  if (exact) return exact.best_apy;
+  const members = assets.filter((x) => x.family === key);
+  if (members.length === 0) return null;
+  return Math.max(...members.map((m) => m.best_apy));
+}
 
 export function blendApy(
   weights: Weight[] | null | undefined,
@@ -291,12 +327,57 @@ export function blendApy(
   if (!weights || weights.length === 0 || !assets) return null;
   let apy = 0;
   for (const w of weights) {
-    const a = assets.find((x) => x.asset === w.asset);
-    if (!a) return null;
-    apy += (a.best_apy * w.weight_bps) / TOTAL_BPS;
+    const rate = rateOf(w.asset, assets);
+    if (rate === null) return null;
+    apy += (rate * w.weight_bps) / TOTAL_BPS;
   }
   return apy;
 }
+
+export type WeightChoice = {
+  id: string;
+  asset: string;
+  family?: boolean;
+  venueId?: string;
+};
+
+export function weightsFor(
+  choices: readonly WeightChoice[],
+  total = TOTAL_BPS,
+): Weight[] {
+  return evenSplit(
+    choices.map((c) => (c.family ? c.id : c.asset)),
+    total,
+  ).map((w, i) =>
+    !choices[i].family && choices[i].venueId
+      ? { ...w, venue_id: choices[i].venueId }
+      : w,
+  );
+}
+
+export const planFlowLegs = (legs: PlanLeg[] | null | undefined): FlowLeg[] =>
+  (legs ?? []).map((l) => ({
+    asset: l.asset,
+    amountUsd: l.price_usd === null ? null : l.amount_usd,
+    venue: l.venue ? { project: l.venue.project, apy: l.venue.apy } : null,
+    idle: false,
+    hold: l.hold,
+    family: l.family,
+    reason: l.reason,
+  }));
+
+export const legLabel = (leg: { asset: string; family?: string }): string =>
+  leg.family && displayAsset(leg.family) !== displayAsset(leg.asset)
+    ? `${displayAsset(leg.family)} → ${displayAsset(leg.asset)}`
+    : displayAsset(leg.asset);
+
+export const fmtUsdCompact = (n: number) =>
+  n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
 
 export const fmtUsd = (n: number) =>
   n.toLocaleString("en-US", {
@@ -409,6 +490,9 @@ const DISPLAY_PROJECT: Record<string, string> = {
   "morpho-blue": "Morpho Blue",
   moonwell: "Moonwell",
 };
+
+// Venue ids are chain:project:pool.
+export const venueProject = (id: string) => id.split(":")[1] ?? id;
 
 export const displayProject = (project: string) =>
   DISPLAY_PROJECT[project] ?? project;
