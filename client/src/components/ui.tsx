@@ -390,9 +390,9 @@ function SwappedMark({ asset, out }: { asset: string; out?: boolean }) {
       <img
         src="/protocols/uniswap.png"
         alt=""
-        width={16}
-        height={16}
-        className="size-4 shrink-0 rounded-full"
+        width={18}
+        height={18}
+        className="aspect-square size-[18px] shrink-0 rounded-md object-contain"
       />
       <span className="tnum">{label}</span>
       <span className="text-muted-foreground/60">on Uniswap</span>

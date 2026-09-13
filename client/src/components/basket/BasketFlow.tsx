@@ -24,15 +24,9 @@ import {
   fmtUsd,
   legLabel,
 } from "@/lib/api";
+import { ProtocolIcon } from "@/components/ProtocolIcon";
 import { TokenIcon } from "@/components/TokenIcon";
 import type { FlowLeg } from "@/lib/types";
-
-const PROTOCOL_MARK: Record<string, string> = {
-  "aave-v3": "aave-v3.png",
-  "compound-v3": "compound-v3.png",
-  "morpho-blue": "morpho-blue.svg",
-  moonwell: "moonwell.png",
-};
 
 type CardData = {
   [k: string]: unknown;
@@ -82,18 +76,8 @@ function Mark({ data }: { data: CardData }) {
     );
   if (data.tone === "idle")
     return <CircleDashed className="size-[22px] shrink-0" />;
-  const file = data.project ? PROTOCOL_MARK[data.project] : undefined;
-  if (!file) return null;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`/protocols/${file}`}
-      alt=""
-      width={22}
-      height={22}
-      className="size-[22px] shrink-0 rounded-full"
-    />
-  );
+  if (!data.project) return null;
+  return <ProtocolIcon project={data.project} size={22} />;
 }
 
 function Card({ data }: NodeProps<CardNode>) {

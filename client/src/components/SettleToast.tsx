@@ -10,23 +10,22 @@ import {
   shortHash,
 } from "@/lib/api";
 import { Button, SettleReport } from "@/components/ui";
+import { ProtocolStack } from "@/components/ProtocolIcon";
 import type { SettleResult } from "@/lib/types";
 
 const settledLeg = (status: string) =>
   status === "submitted" || status === "confirmed";
 
-// Any leg that is not the funding asset went through Uniswap, in whichever
-// direction the leg runs.
-const UniswapIcon = () => (
-  // eslint-disable-next-line @next/next/no-img-element
-  <img
-    src="/protocols/uniswap.png"
-    alt="Uniswap"
-    width={20}
-    height={20}
-    className="size-5 shrink-0 rounded-full"
-  />
-);
+// Uniswap first when any leg swapped, then each venue the money touched, in
+// the order the legs ran. Deduped: two cbBTC legs at Moonwell are one mark.
+function protocolsTouched(legs: SettleResult["legs"]): string[] {
+  const settled = (legs ?? []).filter((l) => settledLeg(l.status));
+  const out = settled.some((l) => l.asset !== QUOTE_ASSET) ? ["uniswap"] : [];
+  for (const l of settled) {
+    if (l.project && !out.includes(l.project)) out.push(l.project);
+  }
+  return out;
+}
 
 type Detail = { key: string; status: number; data: SettleResult };
 
@@ -61,6 +60,7 @@ export function useSettleToast() {
                 : undefined),
             duration: Infinity,
             action: details,
+            icon: <ProtocolStack projects={protocolsTouched(legs)} />,
           },
         );
         return false;
@@ -74,6 +74,7 @@ export function useSettleToast() {
               "The receipt poll timed out; it may still land. Check the hash before retrying — a retry can send the same money twice.",
             duration: Infinity,
             action: details,
+            icon: <ProtocolStack projects={protocolsTouched(legs)} />,
           },
         );
         return false;
@@ -86,7 +87,7 @@ export function useSettleToast() {
         o.successTitle ??
           `${o.verb}${data.submitted_usd !== undefined ? ` ${fmtUsd(data.submitted_usd)}` : ""}`,
         {
-          icon: swapped.length > 0 ? <UniswapIcon /> : undefined,
+          icon: <ProtocolStack projects={protocolsTouched(legs)} />,
           description: [
             swapped.length > 0
               ? `swapped on Uniswap: ${swapped.map((l) => l.asset).join(", ")}`
