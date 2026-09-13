@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import {
   displayAsset,
   fmtPct,
@@ -20,7 +19,6 @@ import {
   PositionReturn,
   Skeleton,
 } from "@/components/ui";
-import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
 import { Reveal } from "@/components/motion";
 import {
@@ -29,17 +27,14 @@ import {
   type Basket,
   type Holding,
   type Portfolio,
-  type SettleResult,
 } from "@/lib/types";
 
 export default function PortfolioPage() {
-  const { ready, authenticated, login, me, api } = useSession();
+  const { ready, authenticated, login, me } = useSession();
   const chain = useChain();
   const portfolio = useApi<Portfolio>("/v1/portfolio");
   const baskets = useApi<Basket[] | null>("/v1/baskets");
 
-  const [busy, setBusy] = useState<string | null>(null);
-  const { notify, detail, clear } = useSettleToast();
 
   const p = portfolio.data;
   const loading = !p && (!ready || portfolio.loading);
@@ -68,33 +63,6 @@ export default function PortfolioPage() {
   const nameOf = (id: string) =>
     (baskets.data ?? []).find((b) => b.id === id)?.name ?? "Basket";
 
-  async function rebalance(basketId: string) {
-    setBusy(basketId);
-    clear();
-    try {
-      const res = await api<SettleResult>(
-        `/v1/baskets/${basketId}/rebalance`,
-        { method: "POST" },
-      );
-      notify(res.status, res.data, {
-        key: basketId,
-        verb: "Rebalanced",
-        successTitle:
-          res.data.moved_legs === 0
-            ? `Nothing to move — no position cleared the drift threshold${
-                res.data.threshold_apy !== undefined
-                  ? ` of ${fmtPct(res.data.threshold_apy)}`
-                  : ""
-              }`
-            : undefined,
-      });
-    } catch (e) {
-      toastError(e);
-    } finally {
-      setBusy(null);
-      portfolio.reload();
-    }
-  }
 
   if (ready && !authenticated) {
     return (
@@ -208,19 +176,6 @@ export default function PortfolioPage() {
                     ? `best drift ${fmtPct(bestDrift)}`
                     : "no better venue than where you are"}
                 </span>
-                <Button
-                  variant="ghost"
-                  className="ml-auto"
-                  disabled={busy !== null || !me?.delegated}
-                  title={
-                    me?.delegated
-                      ? undefined
-                      : "Enable delegation to let the executor move funds"
-                  }
-                  onClick={() => void rebalance(basketId)}
-                >
-                  {busy === basketId ? "Rebalancing…" : "Rebalance"}
-                </Button>
               </div>
 
               <Panel>
@@ -231,9 +186,6 @@ export default function PortfolioPage() {
                 </ul>
               </Panel>
 
-              {detail?.key === basketId && (
-                <SettleDetail detail={detail} onClose={clear} />
-              )}
             </section>
           );
         })}
@@ -292,8 +244,8 @@ function Row({ h }: { h: Holding }) {
           <Divider />
           <div className="pt-2 text-xs text-warning">
             {fmtPct(h.drift_apy)} better available
-            {h.best_venue ? ` at ${h.best_venue.project}` : ""} — rebalance to
-            take it, or leave it to the keeper.
+            {h.best_venue ? ` at ${h.best_venue.project}` : ""} — the keeper
+            moves it once the gain covers the round trip.
           </div>
         </>
       )}

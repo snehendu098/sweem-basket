@@ -8,8 +8,8 @@ use crate::{
     rpc::{self, Outcome, POLL_INTERVAL},
     exchanges::{self, SwapPath},
     venues::{
-        approve_call, approve_if_needed, deposit_call, usd_to_units, withdraw_call, Call, Venue,
-        VenueKind,
+        approve_call, approve_if_needed, deposit_call, max_withdrawable, usd_to_units,
+        withdraw_call, Call, Venue, VenueKind,
     },
     AppState,
 };
@@ -118,7 +118,7 @@ pub async fn route(
                 // Only the funding asset is already in the wallet. Every other
                 // asset must be bought first, USD-pegged or not.
                 Some(v) if v.symbol == req.asset && req.asset == FUNDING_ASSET => {
-                    let amount = units(&req, v)?;
+                    let amount = units(&state, &req, v).await?;
                     let rpc = state.rpc.get(&req.chain_id).expect("chain checked above");
                     let mut calls = Vec::with_capacity(2);
                     if let Some(a) =
@@ -138,8 +138,35 @@ pub async fn route(
                 swap_exit(&state, &req, owner).await?.0
             }
             Some(v) => {
-                let amount = units(&req, v)?;
-                vec![encode(withdraw_call(v, amount, owner), &req)?]
+                let asked = units(&state, &req, v).await?;
+                // A USD amount converted at today's price overshoots a position
+                // whose asset has fallen, and a Compound fork answers that with
+                // an error code inside a successful transaction rather than a
+                // revert. Take what the venue says is there.
+                let amount = match max_withdrawable(
+                    state.rpc.get(&req.chain_id).expect("chain checked above"),
+                    v,
+                    owner,
+                )
+                .await
+                {
+                    Some(max) if max.is_zero() => {
+                        return Err(RouteResponse::failed(
+                            &req.execution_id,
+                            format!("{} holds no {} for this wallet", v.id, v.symbol),
+                        ))
+                    }
+                    Some(max) => asked.min(max),
+                    None => asked,
+                };
+                let mut calls = vec![encode(withdraw_call(v, amount, owner), &req)?];
+                // Redeeming returns the venue's own asset. A withdrawal is
+                // denominated in USDC, so anything else is swapped back rather
+                // than left in the wallet as a token the user did not ask for.
+                if v.symbol != FUNDING_ASSET {
+                    calls.extend(swap_to_funding(&state, &req, v.asset, amount, owner).await?);
+                }
+                calls
             }
             None => swap_exit(&state, &req, owner).await?.0,
         },
@@ -175,7 +202,7 @@ pub async fn route(
                 calls.push(encode(deposit_call(dst, usdc, owner), &req)?);
                 calls
             } else {
-                let amount = units(&req, src)?;
+                let amount = units(&state, &req, src).await?;
                 vec![
                     encode(withdraw_call(src, amount, owner), &req)?,
                     approve_call(dst, amount),
@@ -388,6 +415,36 @@ fn same_symbol(
     Ok(())
 }
 
+async fn swap_to_funding(
+    state: &AppState,
+    req: &RouteRequest,
+    token: Address,
+    amount: alloy_primitives::U256,
+    owner: Address,
+) -> Result<Vec<Call>, (StatusCode, Json<RouteResponse>)> {
+    let path: &SwapPath = state
+        .swaps
+        .get(req.chain_id, &req.asset, FUNDING_ASSET)
+        .ok_or_else(|| {
+            RouteResponse::failed(
+                &req.execution_id,
+                format!(
+                    "no allowlisted swap path {}->{FUNDING_ASSET} on chain {}: the position can be redeemed but not returned as {FUNDING_ASSET}",
+                    req.asset, req.chain_id
+                ),
+            )
+        })?;
+
+    let min_out = quote_min_out(state, req, path, amount, "exit swap quoted").await?;
+    let rpc = state.rpc.get(&req.chain_id).expect("chain checked by caller");
+    let mut calls = Vec::with_capacity(2);
+    if let Some(a) = approve_if_needed(rpc, token, path.router, owner, amount).await {
+        calls.push(a);
+    }
+    calls.push(path.swap_call(amount, min_out, owner));
+    Ok(calls)
+}
+
 async fn swap_exit(
     state: &AppState,
     req: &RouteRequest,
@@ -551,7 +608,12 @@ fn lookup<'a>(
         .ok_or_else(|| RouteResponse::failed(execution_id, format!("venue not allowlisted: {id}")))
 }
 
-fn units(
+/// A USD amount in the venue asset's own units. Pegged assets convert
+/// arithmetically; everything else is priced by quoting the allowlisted
+/// USDC->asset swap, the same way a hold position is sized. No oracle: the
+/// pool we would trade against is the price that matters here.
+async fn units(
+    state: &AppState,
     req: &RouteRequest,
     venue: &Venue,
 ) -> Result<alloy_primitives::U256, (StatusCode, Json<RouteResponse>)> {
@@ -561,13 +623,10 @@ fn units(
             format!("venue {} holds {}, not {}", venue.id, venue.symbol, req.asset),
         ));
     }
-    if !is_usd_pegged(&venue.symbol) {
-        return Err(RouteResponse::failed(
-            &req.execution_id,
-            format!("non-stable asset {} needs a price feed; not supported yet", venue.symbol),
-        ));
+    if is_usd_pegged(&venue.symbol) {
+        return Ok(usd_to_units(req.amount_usd, venue.asset_decimals));
     }
-    Ok(usd_to_units(req.amount_usd, venue.asset_decimals))
+    hold_units(state, req).await
 }
 
 fn is_usd_pegged(symbol: &str) -> bool {
@@ -696,6 +755,48 @@ mod tests {
         .await;
         assert!(call.is_some(), "an unreadable allowance must still approve");
         assert_eq!(call.unwrap().data[..4], [0x09, 0x5e, 0xa7, 0xb3]);
+    }
+
+    /// cbBTC is not a dollar, so a $5 withdrawal is whatever the allowlisted
+    /// pool says $5 of cbBTC is. It must reach the quoter rather than being
+    /// refused for want of a price feed.
+    /// A withdrawal is denominated in USDC, so a venue with no way back does
+    /// not belong on the allowlist at all — not even an unreachable one, which
+    /// becomes a trap the moment someone adds its entry path.
+    #[test]
+    fn every_venue_can_return_to_funding() {
+        let s = state();
+        let mut stranded = Vec::new();
+        for v in s.venues.all() {
+            if v.symbol == FUNDING_ASSET {
+                continue;
+            }
+            if s.swaps.get(v.chain_id, &v.symbol, FUNDING_ASSET).is_none() {
+                stranded.push(format!("{} ({} on {})", v.id, v.symbol, v.chain_id));
+            }
+        }
+        assert!(
+            stranded.is_empty(),
+            "these venues cannot be exited to {FUNDING_ASSET} and must not be allowlisted: {stranded:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_stable_withdraw_is_priced_by_the_pool() {
+        let mut r = req("withdraw");
+        r.asset = "cbBTC".into();
+        r.from_venue_id = venue_id(8453, "cbBTC");
+        let err = route(State(state()), Json(r)).await.unwrap_err();
+        assert!(
+            !err.1.error.contains("needs a price feed"),
+            "a pool quote is the price: {}",
+            err.1.error
+        );
+        assert!(
+            err.1.error.contains("could not price") || err.1.error.contains("could not quote"),
+            "{}",
+            err.1.error
+        );
     }
 
     #[tokio::test]

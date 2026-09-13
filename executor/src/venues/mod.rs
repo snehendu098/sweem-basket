@@ -145,6 +145,32 @@ pub async fn approve_if_needed(
     }
 }
 
+/// What the venue says this owner can actually take out, in asset units.
+/// `None` means the protocol does not expose it cheaply and the caller should
+/// send what was asked: Aave reverts on an overdraw, which is safe, while a
+/// Compound fork returns an error code inside a successful transaction.
+pub async fn max_withdrawable(
+    rpc: &crate::rpc::Rpc,
+    venue: &Venue,
+    owner: Address,
+) -> Option<U256> {
+    // balanceOfUnderlying(address) / maxWithdraw(address) / balanceOf(address)
+    let (target, selector) = match venue.kind {
+        VenueKind::CToken => (venue.target, [0x3a, 0xf9, 0xe6, 0x69]),
+        VenueKind::Erc4626 => (venue.target, [0xce, 0x96, 0xcb, 0x77]),
+        VenueKind::CompoundV3 => (venue.target, [0x70, 0xa0, 0x82, 0x31]),
+        VenueKind::AaveV3 | VenueKind::Hold => return None,
+    };
+
+    let mut data = Vec::with_capacity(36);
+    data.extend_from_slice(&selector);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(owner.as_slice());
+
+    let out = rpc.eth_call(&target.to_string(), &data).await?;
+    (out.len() >= 32).then(|| U256::from_be_slice(&out[..32]))
+}
+
 pub fn approve(token: Address, spender: Address, amount: U256) -> Call {
     Call {
         to: token,
@@ -188,6 +214,22 @@ pub(crate) fn test_venue(kind: VenueKind) -> Venue {
         asset: Address::repeat_byte(0x22),
         asset_decimals: 6,
         symbol: "USDC".into(),
+    }
+}
+
+#[cfg(test)]
+mod withdrawable_tests {
+    use super::*;
+
+    /// The selectors are the contract: balanceOfUnderlying for a cToken,
+    /// maxWithdraw for a vault, balanceOf for a Comet. Aave exposes none of
+    /// these on the pool and reverts on an overdraw instead.
+    #[test]
+    fn each_kind_reads_the_right_balance() {
+        use alloy_primitives::hex;
+        assert_eq!(&hex::decode("3af9e669").unwrap()[..], [0x3a, 0xf9, 0xe6, 0x69]);
+        assert_eq!(&hex::decode("ce96cb77").unwrap()[..], [0xce, 0x96, 0xcb, 0x77]);
+        assert_eq!(&hex::decode("70a08231").unwrap()[..], [0x70, 0xa0, 0x82, 0x31]);
     }
 }
 

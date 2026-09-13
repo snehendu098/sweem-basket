@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, TriangleAlert } from "lucide-react";
 import {
+  QUOTE_ASSET,
   basescanTx,
   displayAsset,
   displayProject,
@@ -377,6 +378,23 @@ export function SettleReport({
   );
 }
 
+// Any leg whose asset is not the funding asset passes through Uniswap, in one
+// direction on the way in and the other on the way out.
+function SwappedMark() {
+  return (
+    <Tooltip label="routed through Uniswap">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/protocols/uniswap.png"
+        alt="routed through Uniswap"
+        width={16}
+        height={16}
+        className="size-4 shrink-0 rounded-full"
+      />
+    </Tooltip>
+  );
+}
+
 function LegRow({ leg }: { leg: LegResult }) {
   return (
     <li className="p-4">
@@ -394,6 +412,7 @@ function LegRow({ leg }: { leg: LegResult }) {
             {displayProject(leg.project)}
           </span>
         )}
+        {leg.asset !== QUOTE_ASSET && <SwappedMark />}
         {leg.tx_hash && <TxLink hash={leg.tx_hash} />}
       </div>
       {leg.reason && (

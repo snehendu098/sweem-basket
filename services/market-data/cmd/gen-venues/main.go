@@ -54,9 +54,48 @@ var kinds = map[string]string{
 	source.ProtocolHold: "hold",
 }
 
+const fundingAsset = "USDC"
+
+// A venue whose asset cannot be swapped back is a place funds go and cannot
+// leave. Withdrawals are denominated in USDC, so this is a hard gate, not a
+// preference.
+func exitable(entries []entry, swapsPath string) (kept []entry, stranded []entry) {
+	raw, err := os.ReadFile(swapsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL cannot read %s: %v\n", swapsPath, err)
+		os.Exit(1)
+	}
+	var doc struct {
+		Paths []struct {
+			ChainID int    `json:"chain_id"`
+			From    string `json:"from"`
+			To      string `json:"to"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL cannot parse %s: %v\n", swapsPath, err)
+		os.Exit(1)
+	}
+	exits := map[string]bool{}
+	for _, p := range doc.Paths {
+		if p.To == fundingAsset {
+			exits[fmt.Sprintf("%d:%s", p.ChainID, p.From)] = true
+		}
+	}
+	for _, e := range entries {
+		if e.Symbol == fundingAsset || exits[fmt.Sprintf("%d:%s", e.ChainID, e.Symbol)] {
+			kept = append(kept, e)
+			continue
+		}
+		stranded = append(stranded, e)
+	}
+	return kept, stranded
+}
+
 func main() {
 	out := flag.String("out", "executor/venues.json", "file to write")
 	dryRun := flag.Bool("dry-run", false, "print the result, write nothing")
+	swaps := flag.String("swaps", "executor/swaps.json", "swap allowlist, read to check every venue can be exited")
 	minTVL := flag.Float64("min-tvl", -1, "override the chain's USD TVL floor")
 	flag.Parse()
 
@@ -81,6 +120,16 @@ func main() {
 		skipped = append(skipped, sk...)
 	}
 
+	entries, stranded := exitable(entries, *swaps)
+	for _, v := range stranded {
+		label, _ := chains.Label(v.ChainID)
+		skipped = append(skipped, skip{
+			ID:     v.ID,
+			Chain:  label,
+			Reason: "no allowlisted swap path back to " + fundingAsset,
+		})
+	}
+
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].ID < skipped[j].ID })
 
@@ -103,6 +152,7 @@ func main() {
 				"withdrawable: clears the MIN_LIQUIDITY_USD floor on measured, live withdrawable liquidity",
 				"verified: symbol/decimals plus a protocol identity check, on chain",
 				"familied: a human has decided the asset's substitution family (or that it has none)",
+				"exitable: an allowlisted swap path returns the asset to " + fundingAsset,
 				"id equals venue.MakeID(chain, project, pool)",
 			},
 		},

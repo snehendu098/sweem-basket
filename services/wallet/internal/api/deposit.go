@@ -1,17 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/auth"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/executor"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/marketdata"
 	"github.com/snehendu098/sweem-basket/services/wallet/internal/store"
+	"github.com/snehendu098/sweem-basket/services/wallet/internal/tokenapi"
 )
 
 func allocate(totalCents int64, weights []int64) []int64 {
@@ -276,6 +279,26 @@ func (s *Server) run(r *http.Request, u store.User, e store.Execution, req execu
 	}
 }
 
+func fmtUSD(v float64) string { return fmt.Sprintf("$%.2f", v) }
+
+// The balance is a pre-flight courtesy, not a safety boundary: the chain
+// refuses an overdraw regardless. Unknown means proceed, not block.
+func (s *Server) quoteBalance(ctx context.Context, wallet string) (float64, bool) {
+	balances, err := s.TokenAPI.Balances(ctx, wallet, tokenAPINetwork(s.DefaultChain), 100)
+	if err != nil {
+		if !errors.Is(err, tokenapi.ErrNotConfigured) {
+			s.Log.Warn("balance preflight", "err", err)
+		}
+		return 0, false
+	}
+	for _, b := range balances {
+		if strings.EqualFold(b.Symbol, QuoteAsset) {
+			return b.Value, true
+		}
+	}
+	return 0, true
+}
+
 func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.caller(w, r)
 	if !ok {
@@ -299,6 +322,15 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.Log.Error("get basket", "err", err)
 		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// A short balance otherwise surfaces as a router STF revert on whichever leg
+	// runs after the funds are gone, leaving the basket half placed.
+	if held, ok := s.quoteBalance(r.Context(), u.WalletAddress); ok && held+0.005 < body.AmountUSD {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+			"this deposit needs %s but the wallet holds %s %s",
+			fmtUSD(body.AmountUSD), fmtUSD(held), QuoteAsset))
 		return
 	}
 
@@ -381,6 +413,14 @@ func (s *Server) deposit(w http.ResponseWriter, r *http.Request) {
 			res.Reason = "submitted, but the position record failed to save"
 		}
 		results = append(results, res)
+	}
+
+	// The keeper only watches subscriptions, so money in a basket nobody is
+	// subscribed to would never be rebalanced. Funding it is the opt-in.
+	if submittedUSD > 0 {
+		if _, err := s.Store.Subscribe(r.Context(), u.ID, b.ID); err != nil {
+			s.Log.Error("subscribe on deposit", "basket_id", b.ID, "err", err)
+		}
 	}
 
 	writeJSON(w, settledStatus(failed, pending), map[string]any{
