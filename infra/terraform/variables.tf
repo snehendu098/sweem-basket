@@ -12,10 +12,14 @@ variable "name" {
 
 # The Rust executor is the reason this is not a t3.micro: a release build of
 # alloy needs more than 2 GB. The playbook also adds swap.
+#
+# A Free Tier plan account refuses anything outside its eligible list, which is
+# why this is a flex instance rather than a t3. m7i-flex.large (8 GB) is the
+# other eligible size worth having.
 variable "instance_type" {
   type        = string
-  default     = "t3.medium"
-  description = "EC2 instance type. t3.small works only if you build images elsewhere."
+  default     = "c7i-flex.large"
+  description = "EC2 instance type. 4 GB is the floor for building the executor on the box."
 }
 
 variable "root_volume_gb" {

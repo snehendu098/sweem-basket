@@ -24,7 +24,6 @@ destroy:
 deploy:
 	cd ansible && ansible-galaxy collection install -r requirements.yml && ansible-playbook playbook.yml
 
-# Prove the two APIs are live over TLS from outside the box.
 check:
 	@for h in $$(grep -E '^(api|market)_domain' ansible/inventory.ini | cut -d= -f2); do \
 		printf '%-32s %s\n' "$$h" "$$(curl -s -o /dev/null -w '%{http_code}' https://$$h/health)"; \
