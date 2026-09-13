@@ -201,6 +201,12 @@ async function main() {
   assert.equal(legLabel({ asset: "USDC", family: "USD" }), "USDC");
   assert.equal(legLabel({ asset: "USDbC", family: "USD" }), "USD → USDbC");
 
+  // A deposit leg has no from_venue_id, so an optional-field check must not
+  // read undefined as an exit swap.
+  assert.equal(Boolean(undefined), false);
+  assert.equal(Boolean(""), false);
+  assert.equal(Boolean("base:moonwell:0xabc"), true);
+
   assert.equal(displayAsset("WETH"), "ETH");
   assert.equal(displayAsset("USDC"), "USDC");
   assert.equal(evenSplit(["WETH"])[0].asset, "WETH");

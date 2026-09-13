@@ -2,12 +2,31 @@
 
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { ApiError, basescanTx, fmtUsd, shortHash } from "@/lib/api";
+import {
+  ApiError,
+  QUOTE_ASSET,
+  basescanTx,
+  fmtUsd,
+  shortHash,
+} from "@/lib/api";
 import { Button, SettleReport } from "@/components/ui";
 import type { SettleResult } from "@/lib/types";
 
 const settledLeg = (status: string) =>
   status === "submitted" || status === "confirmed";
+
+// Any leg that is not the funding asset went through Uniswap, in whichever
+// direction the leg runs.
+const UniswapIcon = () => (
+  // eslint-disable-next-line @next/next/no-img-element
+  <img
+    src="/protocols/uniswap.png"
+    alt="Uniswap"
+    width={20}
+    height={20}
+    className="size-5 shrink-0 rounded-full"
+  />
+);
 
 type Detail = { key: string; status: number; data: SettleResult };
 
@@ -60,11 +79,22 @@ export function useSettleToast() {
         return false;
       }
 
+      const swapped = legs.filter(
+        (l) => settledLeg(l.status) && l.asset !== QUOTE_ASSET,
+      );
       toast.success(
         o.successTitle ??
           `${o.verb}${data.submitted_usd !== undefined ? ` ${fmtUsd(data.submitted_usd)}` : ""}`,
         {
-          description: hash ? `tx ${shortHash(hash)}` : undefined,
+          icon: swapped.length > 0 ? <UniswapIcon /> : undefined,
+          description: [
+            swapped.length > 0
+              ? `swapped on Uniswap: ${swapped.map((l) => l.asset).join(", ")}`
+              : null,
+            hash ? `tx ${shortHash(hash)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
           duration: 6000,
           action: hash
             ? {

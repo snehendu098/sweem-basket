@@ -380,18 +380,23 @@ export function SettleReport({
 
 // Any leg whose asset is not the funding asset passes through Uniswap, in one
 // direction on the way in and the other on the way out.
-function SwappedMark() {
+function SwappedMark({ asset, out }: { asset: string; out?: boolean }) {
+  const label = out
+    ? `${displayAsset(asset)} → ${QUOTE_ASSET}`
+    : `${QUOTE_ASSET} → ${displayAsset(asset)}`;
   return (
-    <Tooltip label="routed through Uniswap">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary/60 py-0.5 pl-1 pr-2.5 text-xs text-muted-foreground">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/protocols/uniswap.png"
-        alt="routed through Uniswap"
+        alt=""
         width={16}
         height={16}
         className="size-4 shrink-0 rounded-full"
       />
-    </Tooltip>
+      <span className="tnum">{label}</span>
+      <span className="text-muted-foreground/60">on Uniswap</span>
+    </span>
   );
 }
 
@@ -412,7 +417,9 @@ function LegRow({ leg }: { leg: LegResult }) {
             {displayProject(leg.project)}
           </span>
         )}
-        {leg.asset !== QUOTE_ASSET && <SwappedMark />}
+        {leg.asset !== QUOTE_ASSET && (
+          <SwappedMark asset={leg.asset} out={Boolean(leg.from_venue_id)} />
+        )}
         {leg.tx_hash && <TxLink hash={leg.tx_hash} />}
       </div>
       {leg.reason && (
