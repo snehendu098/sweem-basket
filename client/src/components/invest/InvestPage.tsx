@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { blendApy, marketAssets, publicBaskets, sameChain } from "@/lib/api";
 import { useChain } from "@/lib/chain";
 import { useApi, useAsync, useSession } from "@/lib/session";
-import { ErrorBox, Spinner } from "@/components/ui";
+import { ErrorBox } from "@/components/ui";
 import { HeroSection } from "./HeroSection";
 import { FeaturedCarousel } from "./FeaturedCarousel";
 import { ALL_ASSETS, FilterBar } from "./FilterBar";
@@ -85,10 +85,9 @@ export function InvestPage() {
       />
 
       {error && <ErrorBox message={error} />}
-      {loading && <Spinner label="Loading baskets…" />}
 
-      {featured.length > 0 && (
-        <FeaturedCarousel baskets={featured} apys={apys} />
+      {(loading || featured.length > 0) && (
+        <FeaturedCarousel baskets={featured} apys={apys} loading={loading} />
       )}
 
       <FilterBar
@@ -102,6 +101,7 @@ export function InvestPage() {
       <BasketTable
         baskets={filtered}
         apys={apys}
+        loading={loading}
         empty={
           baskets.length === 0 ? (
             <>

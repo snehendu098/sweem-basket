@@ -18,7 +18,7 @@ import {
   ErrorBox,
   Panel,
   PositionReturn,
-  Spinner,
+  Skeleton,
 } from "@/components/ui";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
 import { TokenIcon } from "@/components/TokenIcon";
@@ -42,6 +42,7 @@ export default function PortfolioPage() {
   const { notify, detail, clear } = useSettleToast();
 
   const p = portfolio.data;
+  const loading = !p && (!ready || portfolio.loading);
   const all = p?.positions ?? [];
   const positions = all.filter((h) => sameChain(h.chain, chain.label));
   const split = positions.length !== all.length;
@@ -119,14 +120,26 @@ export default function PortfolioPage() {
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Total value</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight">
-              {p ? fmtUsd(totalUsd) : "—"}
+              {loading ? (
+                <Skeleton className="h-9 w-32" />
+              ) : p ? (
+                fmtUsd(totalUsd)
+              ) : (
+                "—"
+              )}
             </div>
           </div>
           <div className="w-px self-stretch bg-border" />
           <div className="flex-1">
             <div className="text-sm text-muted-foreground">Blended APY</div>
             <div className="tnum mt-1 text-3xl font-medium tracking-tight text-positive">
-              {p ? fmtPct(blendedApy) : "—"}
+              {loading ? (
+                <Skeleton className="h-9 w-24" />
+              ) : p ? (
+                fmtPct(blendedApy)
+              ) : (
+                "—"
+              )}
             </div>
           </div>
         </div>
@@ -143,10 +156,29 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {portfolio.loading && <Spinner label="Loading portfolio…" />}
+        {loading && (
+          <Panel>
+            <ul className="divide-y divide-border">
+              {[0, 1, 2].map((i) => (
+                <li key={i} className="p-5">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-5 rounded-full" />
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="ml-auto h-4 w-20" />
+                  </div>
+                  <div className="mt-2 flex items-center gap-4">
+                    <Skeleton className="h-3 w-28" />
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="ml-auto h-3 w-16" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
         {portfolio.error && <ErrorBox message={portfolio.error} />}
 
-        {p && positions.length === 0 && !portfolio.loading && (
+        {p && positions.length === 0 && !loading && (
           <Panel>
             <div className="flex items-center justify-between p-5 text-sm">
               <span className="text-muted-foreground">

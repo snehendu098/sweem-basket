@@ -25,6 +25,7 @@ import {
   Label,
   Panel,
   PositionReturn,
+  Skeleton,
   Spinner,
 } from "@/components/ui";
 import { SettleDetail, toastError, useSettleToast } from "@/components/SettleToast";
@@ -50,7 +51,7 @@ export default function BasketPage() {
     useSession();
 
   const [mode, setMode] = useState<Mode>("deposit");
-  const [amount, setAmount] = useState("1000");
+  const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [subBusy, setSubBusy] = useState(false);
   const { notify, detail, clear } = useSettleToast();
@@ -74,6 +75,7 @@ export default function BasketPage() {
   }, [parsed, amountValid]);
 
   const b: BasketSummary | null = basket.data;
+  const pfLoading = portfolio.loading && portfolio.data === null;
   const balance = (portfolio.data?.onchain?.balances ?? []).find(
     (x) => x.symbol === QUOTE_ASSET,
   );
@@ -189,7 +191,12 @@ export default function BasketPage() {
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-2xl font-medium tracking-tight">
-                {b?.name ?? (basket.loading ? "…" : "Basket")}
+                {b?.name ??
+                  (basket.loading ? (
+                    <Skeleton className="h-7 w-52" />
+                  ) : (
+                    "Basket"
+                  ))}
               </h1>
               <p className="truncate text-sm text-muted-foreground">
                 {handle || "—"}
@@ -231,6 +238,26 @@ export default function BasketPage() {
               />
             </Panel>
 
+            {pfLoading && (
+              <Panel>
+                <div className="px-5 py-5">
+                  <Label>Per asset</Label>
+                </div>
+                <ul className="divide-y divide-border border-t border-border">
+                  {[0, 1, 2].map((i) => (
+                    <li
+                      key={i}
+                      className="flex items-center gap-3 px-5 py-4"
+                    >
+                      <Skeleton className="size-5 rounded-full" />
+                      <Skeleton className="h-4 w-28" />
+                      <Skeleton className="ml-auto h-4 w-20" />
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            )}
+
             {holdings.length > 0 && (
               <Panel>
                 <div className="flex items-center justify-between px-5 py-5">
@@ -264,24 +291,46 @@ export default function BasketPage() {
               <Stat
                 label="Yield APY"
                 tone="good"
-                value={apy === null ? "—" : <CountUp value={apy} format={fmtPct} />}
+                value={
+                  apy !== null ? (
+                    <CountUp value={apy} format={fmtPct} />
+                  ) : plan.loading || pfLoading ? (
+                    <Skeleton className="h-7 w-24" />
+                  ) : (
+                    "—"
+                  )
+                }
                 note={
                   holdings.length > 0 ? "on your positions" : "on the routing plan"
                 }
               />
               <Stat
                 label="Your position"
-                value={authenticated ? fmtUsd(held) : "—"}
+                value={
+                  pfLoading ? (
+                    <Skeleton className="h-7 w-24" />
+                  ) : authenticated ? (
+                    fmtUsd(held)
+                  ) : (
+                    "—"
+                  )
+                }
                 note="this basket, your wallet"
               />
               <Stat
                 label="Creator"
                 value={
-                  b?.created_by_me === undefined
-                    ? "—"
-                    : b.created_by_me
-                      ? "You"
-                      : "Another user"
+                  b?.created_by_me !== undefined ? (
+                    b.created_by_me ? (
+                      "You"
+                    ) : (
+                      "Another user"
+                    )
+                  ) : basket.loading ? (
+                    <Skeleton className="h-7 w-28" />
+                  ) : (
+                    "—"
+                  )
                 }
                 note={b?.created_at ? fmtTime(b.created_at) : undefined}
               />
@@ -386,7 +435,7 @@ export default function BasketPage() {
                     onChange={(e) => setAmount(e.target.value)}
                     inputMode="decimal"
                     aria-label="Amount in USDC"
-                    placeholder="0.00"
+                    placeholder="1000"
                     className="tnum w-full bg-transparent text-4xl font-medium tracking-tight outline-none placeholder:text-muted-foreground/40"
                   />
                   <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-secondary/70 py-2 pl-3 pr-4 text-sm font-medium">

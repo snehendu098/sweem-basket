@@ -55,6 +55,15 @@ export function Spinner({ label }: { label?: string }) {
   );
 }
 
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={cn("animate-pulse rounded-md bg-secondary/60", className)}
+    />
+  );
+}
+
 export function ErrorBox({ message }: { message: string }) {
   return (
     <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs break-words text-destructive">

@@ -1,5 +1,6 @@
 "use client";
 
+import { Skeleton } from "@/components/ui";
 import { BasketTableRow } from "./BasketTableRow";
 import type { BasketSummary } from "@/lib/types";
 
@@ -9,10 +10,12 @@ export function BasketTable({
   baskets,
   apys,
   empty,
+  loading,
 }: {
   baskets: BasketSummary[];
   apys: Map<string, number | null>;
   empty: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
@@ -30,7 +33,30 @@ export function BasketTable({
           </tr>
         </thead>
         <tbody>
-          {baskets.length > 0 ? (
+          {loading ? (
+            [0, 1, 2, 3, 4].map((i) => (
+              <tr key={i} className="border-b border-border">
+                <td className="px-4 py-4">
+                  <Skeleton className="h-4 w-4" />
+                </td>
+                <td className="px-4 py-4">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-full" />
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                </td>
+                <td className="px-4 py-4">
+                  <Skeleton className="h-4 w-28" />
+                </td>
+                <td className="px-4 py-4">
+                  <Skeleton className="h-4 w-16" />
+                </td>
+                <td className="px-4 py-4">
+                  <Skeleton className="h-4 w-20" />
+                </td>
+              </tr>
+            ))
+          ) : baskets.length > 0 ? (
             baskets.map((b, i) => (
               <BasketTableRow
                 key={b.id}

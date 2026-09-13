@@ -38,7 +38,7 @@ import {
   ErrorBox,
   Label,
   Panel,
-  Spinner,
+  Skeleton,
 } from "@/components/ui";
 import { Faq } from "@/components/Faq";
 import { TokenPicker, type PickOption } from "@/components/TokenPicker";
@@ -453,9 +453,7 @@ export default function Create() {
             <div className="p-5">
               <Label>Tokens</Label>
               {assets.loading ? (
-                <div className="mt-4">
-                  <Spinner label="Loading tokens…" />
-                </div>
+                <Skeleton className="mt-4 h-[42px] w-full rounded-lg" />
               ) : assets.error ? (
                 <div className="mt-4">
                   <ErrorBox message={assets.error} />

@@ -2,15 +2,18 @@
 
 import { useRef } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { Skeleton } from "@/components/ui";
 import { BasketCard } from "./BasketCard";
 import type { BasketSummary } from "@/lib/types";
 
 export function FeaturedCarousel({
   baskets,
   apys,
+  loading,
 }: {
   baskets: BasketSummary[];
   apys: Map<string, number | null>;
+  loading?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -34,9 +37,25 @@ export function FeaturedCarousel({
       </div>
 
       <div ref={scrollRef} className="no-scrollbar flex gap-3 overflow-x-auto">
-        {baskets.map((b) => (
-          <BasketCard key={b.id} basket={b} apy={apys.get(b.id) ?? null} />
-        ))}
+        {loading
+          ? [0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="flex h-[164px] w-[270px] shrink-0 flex-col justify-between rounded-xl border border-border bg-card p-5"
+              >
+                <div className="flex items-start gap-3">
+                  <Skeleton className="size-9 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                </div>
+                <Skeleton className="h-9 w-32" />
+              </div>
+            ))
+          : baskets.map((b) => (
+              <BasketCard key={b.id} basket={b} apy={apys.get(b.id) ?? null} />
+            ))}
       </div>
     </div>
   );
